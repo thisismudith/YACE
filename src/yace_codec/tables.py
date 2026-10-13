@@ -66,6 +66,7 @@ MIN_LENGTH = 2
 MAX_LENGTH = len(CODE_ALPHABET)
 
 _CODE_CHARS = frozenset(CODE_ALPHABET)
+_WHITESPACE_KEYS = frozenset(string.whitespace) - {SPACE_KEY}
 _FAMILY_RE = re.compile(r"[A-Za-z_]{1,64}")
 _MAX_DIGITS = 4
 #: Longest table name (or token header) that is accepted.
@@ -307,6 +308,10 @@ def _validate(
     for key in codes:
         if not isinstance(key, str) or len(key) != 1:
             raise invalid(f"key {key!r} is not a single character")
+        # Control characters (other than whitespace) and lone surrogates could
+        # reach a terminal or break UTF-8 output when decoded.
+        if not (key.isprintable() or key in _WHITESPACE_KEYS):
+            raise invalid(f"key {key!r} is not a printable character")
     if SPACE_KEY in codes:
         raise invalid("the space must use the list of space codes")
     for code in itertools.chain(codes.values(), spaces, bins):

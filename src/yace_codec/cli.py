@@ -220,13 +220,13 @@ def _cmd_import(args: argparse.Namespace) -> int:
         raise KeyStoreError(f"{args.file} is not valid JSON ({exc})") from exc
     if isinstance(tables, dict) and args.family is None and not args.all_families:
         # A shared file could add tables for families you use, such as "default",
-        # so that its sender can decode your future tokens: import one at a time.
+        # so that its sender can decode your future tokens: name the family you expect.
         families = sorted({f for f in map(family_of, tables) if f is not None})
-        if len(families) > 1:
-            raise KeyStoreError(
-                f"{args.file} holds tables for {len(families)} families ({', '.join(families)}); "
-                "choose one with --family NAME, or import all with --all-families"
-            )
+        held = ", ".join(families) or "no valid tables"
+        raise KeyStoreError(
+            f"{args.file} holds tables for: {held}. Name the family you expect with "
+            "--family NAME, or import everything with --all-families"
+        )
     store = _keystore(args)
     result = store.import_tables(tables, overwrite=args.overwrite, family=args.family)
     for label, names in (("added", result.added), ("replaced", result.replaced)):

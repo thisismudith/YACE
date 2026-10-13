@@ -272,9 +272,9 @@ Between machines, use `yace-codec tables export` and `tables import` (see
 with owner-only permissions.
 
 When you import tables from someone else, import only the family you expect
-(`family=` in Python, or the command line's default behaviour). A file could
-otherwise add tables for a family you use, such as `default`, and its sender could
-then decode your later tokens.
+(`family=` in Python, `--family NAME` on the command line). A file could otherwise
+add tables for a family you use, such as `default`, and its sender could then
+decode your later tokens.
 
 ### Unicode text and binary data
 
@@ -376,7 +376,7 @@ files      2       1
 groceries  3       1,2
 
 $ yace-codec tables export groceries -o groceries.json
-$ yace-codec tables import groceries.json --keystore colleague.json
+$ yace-codec tables import groceries.json --family groceries --keystore colleague.json
 added: groceries-3:1
 added: groceries-3:2
 2 added, 0 unchanged, 0 replaced (colleague.json)
@@ -385,13 +385,14 @@ $ yace-codec tables path
 C:\Users\you\AppData\Roaming\yace-codec\keystore.json
 ```
 
-`tables import` refuses a file that holds tables for more than one family, because
-such a file could replace a family you use. Choose one with `--family NAME`, or pass
-`--all-families` if you trust the file:
+`tables import` needs `--family NAME`, which imports only that family's tables, or
+`--all-families` for a file you trust completely. A file could otherwise add tables
+to a family you use, such as `default`, and its sender could then decode your later
+tokens:
 
 ```console
-$ yace-codec tables import mixed.json
-yace-codec: error: mixed.json holds tables for 2 families (default, groceries); choose one with --family NAME, or import all with --all-families
+$ yace-codec tables import groceries.json
+yace-codec: error: groceries.json holds tables for: groceries. Name the family you expect with --family NAME, or import everything with --all-families
 ```
 
 | Command | Options |
@@ -401,7 +402,7 @@ yace-codec: error: mixed.json holds tables for 2 families (default, groceries); 
 | `tables path` | `-k/--keystore PATH` |
 | `tables list` | `-k/--keystore PATH` |
 | `tables export NAME` | `-o/--output PATH`, `-k/--keystore PATH` |
-| `tables import FILE` | `--family NAME` or `--all-families`, `--overwrite`, `-k/--keystore PATH` (use `-` as `FILE` for standard input) |
+| `tables import FILE` | `--family NAME` or `--all-families` (one is required), `--overwrite`, `-k/--keystore PATH` (use `-` as `FILE` for standard input) |
 
 Text mode reads and writes UTF-8 and keeps line endings unchanged, so `decode`
 returns exactly the bytes that were encoded. Token and JSON files saved by Windows
@@ -535,8 +536,8 @@ becomes undecodable. Anyone who has it can decode your tokens.
   contains anything else. Use `encode_bytes()` for other text. Tables from the
   original scripts do not cover `\t`, `\r`, `\x0b`, or `\x0c`.
 - **Settings.** `length` must be 2–62 and `iterations` 1–32. Encoding is refused if
-  `len(text) × length ** iterations` exceeds 2<sup>25</sup> (about 33 million token
-  characters).
+  `len(text) × length ** iterations` exceeds 2<sup>25</sup> (about 33 million
+  characters before bins; with bins, tokens reach about 42 million characters).
 - **Size.** Tokens grow by `length ** iterations`, plus 25% for bins (see
   [Token size](#token-size)). Keep `iterations` small for long texts.
 - **Memory and speed.** Encoding and decoding hold the whole input and token in
@@ -557,8 +558,8 @@ becomes undecodable. Anyone who has it can decode your tokens.
 - **Family names.** Encoding needs a family name of 1–64 ASCII letters or
   underscores, including for existing families from the original scripts. Digits,
   `-`, and `:` are reserved for table names. Decoding accepts any family name the
-  original scripts allowed, such as `my cat` or `café`, except a name that starts or
-  ends with a space.
+  original scripts allowed, such as `my cat` or `café`, except a name that starts
+  with a space.
 
 ## Security
 
@@ -585,10 +586,9 @@ Before version 0.1.0, YACE was a set of scripts in `encoder/` that stored tables
 `encoder/encodings.json`. The package keeps the same algorithm, table format, and
 token format.
 
-- **Keep your old tables.** This release removes `encoder/encodings.json` from the
-  repository, so copy it somewhere safe before you update if you still have tokens
-  made with it. A clone that still has the old history can restore it with
-  `git show 01d44a2:encoder/encodings.json > encodings.json`.
+- **Keep your old tables.** This release no longer includes `encoder/encodings.json`.
+  If you still have tokens made with the original scripts, keep your copy of that
+  file: it is the key store those tokens need.
 - **Old tokens decode with the package.** Use your old `encodings.json` as the key
   store (`--keystore path/to/encodings.json`, or `KeyStore("path/to/encodings.json")`),
   or import its tables with `yace-codec tables import path/to/encodings.json --all-families`.

@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - 2026-10-13
+## [0.1.0] - 2026-10-14
 
 First release on PyPI, as `yace-codec` (import name `yace_codec`).
 
@@ -17,9 +17,9 @@ First release on PyPI, as `yace-codec` (import name `yace_codec`).
   writers never lose tables, keeps the file's permissions, and can export and import
   table families. `import_tables(..., family=...)` imports a single family.
 - `yace-codec` command (also `python -m yace_codec`) with `encode`, `decode`, and
-  `tables path|list|export|import`. `tables import` refuses files that hold several
-  families unless you pass `--family` or `--all-families`, and it lists the tables
-  it adds.
+  `tables path|list|export|import`. `tables import` needs `--family NAME` (or
+  `--all-families`), so a shared file cannot add tables for a family you did not
+  expect, and it lists the tables it adds.
 - Decoding checks that a token's number of noise chunks matches its length, which
   catches many truncated tokens.
 - Tokens and JSON files saved as UTF-16 or with a byte order mark (as Windows
@@ -40,8 +40,9 @@ First release on PyPI, as `yace-codec` (import name `yace_codec`).
 - Without a name, the family `default` is used instead of random letters.
 - Encoding needs a family name of 1–64 ASCII letters or underscores, also for
   existing families. Families with other names can still be decoded.
-- Encoding is limited to tokens of about 2<sup>25</sup> characters
-  (`MAX_ENCODED_CHARS`).
+- Encoding is refused when `len(text) × length ** iterations` exceeds
+  2<sup>25</sup> (`MAX_ENCODED_CHARS`); with bins, tokens reach about
+  1.25 × 2<sup>25</sup> characters.
 
 ### Fixed
 

@@ -429,7 +429,7 @@ def _file_lock(path: Path) -> Iterator[None]:
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = os.open(f"{path}.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        fd = _open_lock(path)
     except OSError as exc:
         raise KeyStoreError(f"cannot lock key store '{path}': {exc}") from exc
     try:
@@ -440,6 +440,29 @@ def _file_lock(path: Path) -> Iterator[None]:
             _unlock_fd(fd)
     finally:
         os.close(fd)
+
+
+def _open_lock(path: Path) -> int:
+    lock = f"{path}.lock"
+    if sys.platform == "win32":
+        return os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    except PermissionError:
+        # Another user's lock file in a shared directory: flock also works on
+        # a read-only descriptor.
+        return os.open(lock, os.O_RDONLY)
+    try:
+        st = os.stat(path)
+    except OSError:
+        return fd
+    # Give the lock the key store's permissions and group, so everyone who may
+    # write a group-shared key store can also take its lock.
+    with contextlib.suppress(OSError):
+        os.fchmod(fd, stat.S_IMODE(st.st_mode) & 0o666)
+    with contextlib.suppress(OSError):
+        os.fchown(fd, -1, st.st_gid)
+    return fd
 
 
 if sys.platform == "win32":

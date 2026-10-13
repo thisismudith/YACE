@@ -24,7 +24,8 @@ with tempfile.TemporaryDirectory() as workdir:
     export_file.write_text(json.dumps(alice.keystore.export_family("team")), encoding="utf-8")
 
     # Bob imports only the family he expects, so a file cannot slip in tables for
-    # families he uses (CLI equivalent: yace-codec tables import team-tables.json).
+    # families he uses (CLI equivalent:
+    # yace-codec tables import team-tables.json --family team).
     tables = json.loads(export_file.read_text(encoding="utf-8"))
     result = bob.keystore.import_tables(tables, family="team")
     print("Bob imported:", ", ".join(result.added))

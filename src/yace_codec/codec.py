@@ -145,7 +145,7 @@ class Codec:
         _check_settings(length, iterations)
         if len(text) * length**iterations > MAX_ENCODED_CHARS:
             raise EncodingError(
-                f"the token would exceed {MAX_ENCODED_CHARS} characters "
+                f"the token would exceed {MAX_ENCODED_CHARS} data characters "
                 f"({len(text)} characters x {length}**{iterations}); "
                 "lower the length or the number of iterations"
             )
