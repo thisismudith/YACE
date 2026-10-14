@@ -5,18 +5,21 @@ from __future__ import annotations
 import argparse
 import contextlib
 import errno
+import getpass
 import json
 import os
 import sys
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Union
 
 from . import __version__
 from .codec import DEFAULT_FAMILY, DEFAULT_ITERATIONS, DEFAULT_LENGTH, Codec
-from .errors import KeyStoreError, UnsupportedCharacterError, YaceError
+from .errors import EncodingError, KeyStoreError, UnsupportedCharacterError, YaceError
 from .keystore import ENV_VAR, KeyStore, family_of
 
 PROG = "yace-codec"
+#: Environment variable that supplies the password for --password (for scripts).
+PASSWORD_ENV_VAR = "YACE_CODEC_PASSWORD"
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -59,8 +62,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog=PROG,
-        description="Encode and decode text with YACE substitution tables. "
-        "YACE obfuscates text; it is not encryption.",
+        description="Encode and decode text with YACE substitution tables (obfuscation), "
+        "or encrypt and decrypt it into yace2 tokens (encryption).",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(title="commands", metavar="COMMAND")
@@ -96,6 +99,60 @@ def _build_parser() -> argparse.ArgumentParser:
         help="the token was made with 'encode --binary'; output the raw bytes",
     )
     dec.set_defaults(handler=_cmd_decode)
+
+    encr = commands.add_parser(
+        "encrypt", parents=[store], help="encrypt text or a file into a yace2 token"
+    )
+    encr.add_argument("input", nargs="?", default="-", help="file to encrypt (default: stdin)")
+    encr.add_argument("-t", "--text", help="encrypt this string instead of INPUT")
+    encr.add_argument("-o", "--output", metavar="PATH", help="write the token here (default: stdout)")
+    secret = encr.add_mutually_exclusive_group()
+    secret.add_argument(
+        "--key", metavar="NAME",
+        help="secret key in the key store (default: default; created on first use)",
+    )
+    secret.add_argument(
+        "-p", "--password", action="store_true",
+        help=f"use a password instead of a stored key (asked for, or ${PASSWORD_ENV_VAR})",
+    )
+    encr.set_defaults(handler=_cmd_encrypt)
+
+    decr = commands.add_parser("decrypt", parents=[store], help="decrypt a yace2 token")
+    decr.add_argument("input", nargs="?", default="-", help="file holding the token (default: stdin)")
+    decr.add_argument("-t", "--text", help="decrypt this token string instead of INPUT")
+    decr.add_argument("-o", "--output", metavar="PATH", help="write the result here (default: stdout)")
+    decr.add_argument(
+        "-p", "--password", action="store_true",
+        help=f"the token was made with a password (asked for, or ${PASSWORD_ENV_VAR})",
+    )
+    decr.add_argument(
+        "--max-age", type=float, metavar="SECONDS", help="reject tokens older than this"
+    )
+    decr.set_defaults(handler=_cmd_decrypt)
+
+    keys = commands.add_parser("keys", help="inspect and share secret keys for encrypt/decrypt")
+    key_actions = keys.add_subparsers(title="actions", metavar="ACTION")
+    key_actions.required = True
+    key_list = key_actions.add_parser("list", parents=[store], help="list secret key names")
+    key_list.set_defaults(handler=_cmd_keys_list)
+    key_export = key_actions.add_parser(
+        "export", parents=[store], help="export a secret key as JSON (keep the file private)"
+    )
+    key_export.add_argument("name", help="key name")
+    key_export.add_argument("-o", "--output", metavar="PATH", help="write here (default: stdout)")
+    key_export.set_defaults(handler=_cmd_keys_export)
+    key_import = key_actions.add_parser("import", parents=[store], help="import secret keys from JSON")
+    key_import.add_argument("file", help="JSON file from 'keys export' ('-' for stdin)")
+    which_key = key_import.add_mutually_exclusive_group()
+    which_key.add_argument("--name", metavar="NAME", help="import only this key")
+    which_key.add_argument(
+        "--all-keys", action="store_true", help="import every key in a file that holds several"
+    )
+    key_import.add_argument(
+        "--overwrite", action="store_true",
+        help="replace existing keys that differ (tokens made with them stop decrypting)",
+    )
+    key_import.set_defaults(handler=_cmd_keys_import)
 
     tables = commands.add_parser("tables", help="inspect and share key store tables")
     actions = tables.add_subparsers(title="actions", metavar="ACTION")
@@ -232,6 +289,86 @@ def _cmd_import(args: argparse.Namespace) -> int:
     for label, names in (("added", result.added), ("replaced", result.replaced)):
         for name in names:
             _echo(f"{label}: {name}", err=True)
+    _echo(
+        f"{len(result.added)} added, {len(result.unchanged)} unchanged, "
+        f"{len(result.replaced)} replaced ({args.keystore or store.path})",
+        err=True,
+    )
+    return 0
+
+
+def _cmd_encrypt(args: argparse.Namespace) -> int:
+    raw = _read_input(args)
+    data: Union[str, bytes] = raw
+    if args.text is not None:
+        with contextlib.suppress(UnicodeDecodeError):
+            data = raw.decode("utf-8")  # so Python's decrypt() returns str
+    if args.password:
+        token = Codec(KeyStore.in_memory()).encrypt(data, password=_password(confirm=True))
+    else:
+        token = Codec(_keystore(args)).encrypt(data, args.key)
+    _write_output(args.output, f"{token}\n".encode("ascii"))
+    return 0
+
+
+def _cmd_decrypt(args: argparse.Namespace) -> int:
+    raw = _read_input(args)
+    if args.password:
+        codec = Codec(KeyStore.in_memory())
+        result = codec.decrypt(raw, password=_password(), max_age=args.max_age)
+    else:
+        result = Codec(_keystore(args)).decrypt(raw, max_age=args.max_age)
+    _write_output(args.output, result.encode("utf-8") if isinstance(result, str) else result)
+    return 0
+
+
+def _password(*, confirm: bool = False) -> str:
+    from_env = os.environ.get(PASSWORD_ENV_VAR)
+    if from_env:
+        return from_env
+    password = getpass.getpass("Password: ")
+    if not password:
+        raise EncodingError("the password is empty")
+    if confirm and getpass.getpass("Repeat password: ") != password:
+        raise EncodingError("the passwords do not match")
+    return password
+
+
+def _cmd_keys_list(args: argparse.Namespace) -> int:
+    store = _keystore(args)
+    names = store.key_names()
+    if not names:
+        _echo(f"no keys in {store.path}", err=True)
+    for name in names:
+        _echo(name)
+    return 0
+
+
+def _cmd_keys_export(args: argparse.Namespace) -> int:
+    payload = json.dumps(_keystore(args).export_key(args.name), indent=2) + "\n"
+    _write_output(args.output, payload.encode("ascii"), private=True)
+    return 0
+
+
+def _cmd_keys_import(args: argparse.Namespace) -> int:
+    raw = sys.stdin.buffer.read() if args.file == "-" else _read_file(args.file)
+    try:
+        keys = json.loads(raw)
+    except (ValueError, RecursionError) as exc:
+        raise KeyStoreError(f"{args.file} is not valid JSON ({exc})") from exc
+    if isinstance(keys, dict) and args.name is None and not args.all_keys:
+        # A shared file could replace or add a key you use, such as "default",
+        # so that its sender can decrypt your future tokens: name the key you expect.
+        names = sorted(entry[4:] for entry in keys if isinstance(entry, str) and entry.startswith("key:"))
+        raise KeyStoreError(
+            f"{args.file} holds keys: {', '.join(names) or 'none'}. Name the key you expect "
+            "with --name NAME, or import everything with --all-keys"
+        )
+    store = _keystore(args)
+    result = store.import_keys(keys, overwrite=args.overwrite, name=args.name)
+    for label, entries in (("added", result.added), ("replaced", result.replaced)):
+        for entry in entries:
+            _echo(f"{label}: {entry[4:]}", err=True)
     _echo(
         f"{len(result.added)} added, {len(result.unchanged)} unchanged, "
         f"{len(result.replaced)} replaced ({args.keystore or store.path})",

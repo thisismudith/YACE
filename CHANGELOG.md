@@ -4,6 +4,34 @@ All notable changes to this project are documented in this file. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-10-14
+
+### Added
+
+- Encryption: `encrypt()` and `decrypt()` (also `Codec.encrypt()` /
+  `Codec.decrypt()`) turn text or bytes into `yace2_` tokens and back. Tokens are
+  authenticated (HMAC-SHA256, encrypt-then-MAC), use per-token keys derived with
+  HKDF-SHA256 from a random salt, and are padded to a Padmé length. They reveal neither
+  the key name, the creation time, the exact length, nor the data type. Everything
+  comes from Python's standard library.
+- Secret keys in the key store (`key:<name>` entries): `ensure_key()`, `get_key()`,
+  `find_key()`, `key_names()`, `export_key()`, and `import_keys(..., name=...)`.
+  `decrypt()` tries every stored key.
+- Password mode: `encrypt(data, password=...)` stretches the password with scrypt and
+  does not touch the key store.
+- `decrypt(..., max_age=SECONDS)` rejects old tokens with `TokenExpiredError`.
+- `DecryptionError` and `TokenExpiredError` (both subclasses of `DecodingError`), and
+  the `DEFAULT_KEY` constant.
+- `yace-codec encrypt`, `yace-codec decrypt` (with `--password`, `--key`, and
+  `--max-age`), and `yace-codec keys list|export|import`. `keys import` needs
+  `--name NAME` or `--all-keys`. `YACE_CODEC_PASSWORD` can supply the password.
+
+### Changed
+
+- `decode()` on a `yace2_` token points to `decrypt()`, and `decrypt()` on an
+  encoded token points to `decode()`.
+- `import_tables()` refuses secret key entries; import them with `import_keys()`.
+
 ## [0.1.0] - 2026-10-14
 
 First release on PyPI, as `yace-codec` (import name `yace_codec`).

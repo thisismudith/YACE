@@ -10,10 +10,12 @@ from typing import Tuple
 
 __all__ = [
     "DecodingError",
+    "DecryptionError",
     "EncodingError",
     "InvalidNameError",
     "KeyStoreError",
     "TableNotFoundError",
+    "TokenExpiredError",
     "UnsupportedCharacterError",
     "YaceError",
 ]
@@ -48,6 +50,14 @@ class UnsupportedCharacterError(EncodingError):
 
 class DecodingError(YaceError, ValueError):
     """The token is malformed, corrupted, or does not match the key store's tables."""
+
+
+class DecryptionError(DecodingError):
+    """An encrypted token cannot be opened: wrong key or password, or it was changed."""
+
+
+class TokenExpiredError(DecryptionError):
+    """An encrypted token is older than the ``max_age`` given to ``decrypt``."""
 
 
 class TableNotFoundError(YaceError, LookupError):

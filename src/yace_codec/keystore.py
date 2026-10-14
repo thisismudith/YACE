@@ -11,6 +11,8 @@ Writes are atomic (temporary file, then rename) and serialised through a
 
 from __future__ import annotations
 
+import base64
+import binascii
 import contextlib
 import itertools
 import json
@@ -23,9 +25,10 @@ import threading
 import time
 from pathlib import Path
 from random import Random
-from typing import Any, Dict, Iterator, List, Mapping, NamedTuple, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Mapping, NamedTuple, Optional, Tuple, Union
 
-from .errors import KeyStoreError, TableNotFoundError
+from .errors import KeyStoreError, TableNotFoundError, YaceError
+from .sealed import KEY_SIZE
 from .tables import Table, parse_table_name, table_name, validate_family
 
 __all__ = ["ENV_VAR", "Family", "ImportResult", "KeyStore", "default_keystore_path"]
@@ -140,13 +143,12 @@ class KeyStore:
             return name in self._loaded()
 
     def __len__(self) -> int:
-        with self._lock:
-            return len(self._loaded())
+        return len(self.table_names())
 
     def table_names(self) -> List[str]:
         """Return the names of all stored tables, sorted."""
         with self._lock:
-            return sorted(self._loaded())
+            return sorted(name for name in self._loaded() if not _is_key_entry(name))
 
     def families(self) -> List[Family]:
         """Group the stored tables by family name and code length."""
@@ -245,19 +247,112 @@ class KeyStore:
         """
         if not isinstance(tables, Mapping):
             raise KeyStoreError("expected a JSON object that maps table names to tables")
+        if any(_is_key_entry(name) for name in tables):
+            raise KeyStoreError(
+                "the data holds secret keys; import them with import_keys() "
+                "(CLI: yace-codec keys import)"
+            )
         if family is not None:
             tables = {name: raw for name, raw in tables.items() if family_of(name) == family}
             if not tables:
                 raise KeyStoreError(f"no tables for family {family!r} to import")
         incoming = {name: Table.from_dict(name, raw).to_dict() for name, raw in tables.items()}
+        return self._import(incoming, overwrite, _normalised, "table")
+
+    # Secret keys for encrypted (yace2) tokens -------------------------------
+
+    def key_names(self) -> List[str]:
+        """Return the names of the stored secret keys, sorted."""
         with self._lock:
-            result = _plan_import(self._loaded(), incoming, overwrite)
+            return sorted(name[len(_KEY_PREFIX) :] for name in self._loaded() if _is_key_entry(name))
+
+    def find_key(self, name: str) -> Optional[bytes]:
+        """Return the secret key ``name``, or ``None`` if the store does not have it."""
+        with self._lock:
+            data = self._loaded()
+            entry = _KEY_PREFIX + name
+            if entry not in data:
+                return None
+            return _parse_key(entry, data[entry])
+
+    def get_key(self, name: str) -> bytes:
+        """Return the secret key ``name``; raise TableNotFoundError if it is missing."""
+        key = self.find_key(name)
+        if key is None:
+            raise TableNotFoundError(f"key {name!r} is not in {self._describe()}", name)
+        return key
+
+    def ensure_key(self, name: str, *, rng: Optional[Random] = None) -> bytes:
+        """Return the secret key ``name``, generating and saving it if it is missing.
+
+        Keys come from the operating system's cryptographic random source
+        unless ``rng`` is given (for reproducible tests only).
+        """
+        validate_family(name)
+        entry = _KEY_PREFIX + name
+        with self._lock:
+            if entry not in self._loaded():
+                with self._editing() as data:
+                    if entry not in data:
+                        secret = (
+                            secrets.token_bytes(KEY_SIZE)
+                            if rng is None
+                            else bytes(rng.getrandbits(8) for _ in range(KEY_SIZE))
+                        )
+                        data[entry] = _key_entry(secret)
+            return self.get_key(name)
+
+    def export_key(self, name: str) -> Dict[str, Dict[str, str]]:
+        """Return the secret key ``name`` as key-store JSON, for :meth:`import_keys`."""
+        return {_KEY_PREFIX + name: _key_entry(self.get_key(name))}
+
+    def import_keys(
+        self,
+        keys: Mapping[str, Any],
+        *,
+        overwrite: bool = False,
+        name: Optional[str] = None,
+    ) -> ImportResult:
+        """Add secret keys (e.g. the output of :meth:`export_key`) to this store.
+
+        With ``name``, only that key is imported. Use it for files from other
+        people: a file could otherwise add a key you use, such as ``default``,
+        so that its sender can decrypt your future tokens. A key that already
+        exists with a different value is only replaced when ``overwrite`` is
+        true, because tokens made with the old key could no longer be opened.
+        """
+        if not isinstance(keys, Mapping):
+            raise KeyStoreError("expected a JSON object that maps key entries to keys")
+        if name is not None:
+            keys = {entry: raw for entry, raw in keys.items() if entry == _KEY_PREFIX + name}
+            if not keys:
+                raise KeyStoreError(f"no key named {name!r} to import")
+        incoming: Dict[str, Dict[str, Any]] = {}
+        for entry, raw in keys.items():
+            if not _is_key_entry(entry):
+                raise KeyStoreError(f"{entry!r} is not a key entry ('key:<name>')")
+            try:
+                validate_family(entry[len(_KEY_PREFIX) :])
+            except YaceError as exc:
+                raise KeyStoreError(f"invalid key name in {entry!r}: {exc}") from None
+            incoming[entry] = _key_entry(_parse_key(entry, raw))
+        return self._import(incoming, overwrite, _normalised_key, "key")
+
+    def _import(
+        self,
+        incoming: Mapping[str, Dict[str, Any]],
+        overwrite: bool,
+        normalise: Callable[[str, Any], Optional[Dict[str, Any]]],
+        what: str,
+    ) -> ImportResult:
+        with self._lock:
+            result = _plan_import(self._loaded(), incoming, overwrite, normalise, what)
             if result.added or result.replaced:
                 with self._editing() as data:
                     # Plan again under the file lock, against the latest file.
-                    result = _plan_import(data, incoming, overwrite)
-                    for name in result.added + result.replaced:
-                        data[name] = incoming[name]
+                    result = _plan_import(data, incoming, overwrite, normalise, what)
+                    for entry in result.added + result.replaced:
+                        data[entry] = incoming[entry]
         return result
 
     def reload(self) -> None:
@@ -312,17 +407,21 @@ def family_of(name: object) -> Optional[str]:
 
 
 def _plan_import(
-    current: Mapping[str, Any], incoming: Mapping[str, Dict[str, Any]], overwrite: bool
+    current: Mapping[str, Any],
+    incoming: Mapping[str, Dict[str, Any]],
+    overwrite: bool,
+    normalise: Callable[[str, Any], Optional[Dict[str, Any]]],
+    what: str,
 ) -> ImportResult:
-    """Sort incoming tables into added/unchanged/replaced, or raise on conflicts."""
+    """Sort incoming entries into added/unchanged/replaced, or raise on conflicts."""
     added: List[str] = []
     unchanged: List[str] = []
     replaced: List[str] = []
     conflicts: List[str] = []
-    for name, table in incoming.items():
+    for name, value in incoming.items():
         if name not in current:
             added.append(name)
-        elif _normalised(name, current[name]) == table:
+        elif normalise(name, current[name]) == value:
             unchanged.append(name)
         elif overwrite:
             replaced.append(name)
@@ -330,12 +429,41 @@ def _plan_import(
             conflicts.append(name)
     if conflicts:
         raise KeyStoreError(
-            f"{len(conflicts)} table(s) already exist with different codes: "
-            f"{', '.join(sorted(conflicts))}. Replacing them makes tokens encoded "
-            "with the old tables undecodable; use overwrite=True (CLI: --overwrite) "
+            f"{len(conflicts)} {what}(s) already exist with different values: "
+            f"{', '.join(sorted(conflicts))}. Replacing them makes tokens made "
+            f"with the old {what}s unreadable; use overwrite=True (CLI: --overwrite) "
             "to replace them anyway."
         )
     return ImportResult(tuple(added), tuple(unchanged), tuple(replaced))
+
+
+_KEY_PREFIX = "key:"
+
+
+def _is_key_entry(name: object) -> bool:
+    return isinstance(name, str) and name.startswith(_KEY_PREFIX)
+
+
+def _key_entry(secret: bytes) -> Dict[str, str]:
+    return {"secret": base64.b64encode(secret).decode("ascii")}
+
+
+def _parse_key(entry: str, raw: Any) -> bytes:
+    value = raw.get("secret") if isinstance(raw, dict) else None
+    try:
+        secret = base64.b64decode(value, validate=True) if isinstance(value, str) else b""
+    except (binascii.Error, ValueError):
+        secret = b""
+    if len(secret) != KEY_SIZE:
+        raise KeyStoreError(f"{entry!r} is invalid: expected a base64 'secret' of {KEY_SIZE} bytes")
+    return secret
+
+
+def _normalised_key(entry: str, raw: Any) -> Optional[Dict[str, Any]]:
+    try:
+        return _key_entry(_parse_key(entry, raw))
+    except KeyStoreError:
+        return None
 
 
 def _normalised(name: str, raw: Any) -> Optional[Dict[str, Any]]:

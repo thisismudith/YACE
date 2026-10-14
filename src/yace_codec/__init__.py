@@ -7,12 +7,14 @@ substitution tables.
 >>> codec.decode(token)
 'Hello, World!'
 
-YACE obfuscates text. It is not encryption: do not use it to protect secrets.
+encode()/decode() only obfuscate text. For secrets, use encrypt()/decrypt(),
+which make encrypted "yace2" tokens.
 """
 
 from .codec import (
     DEFAULT_FAMILY,
     DEFAULT_ITERATIONS,
+    DEFAULT_KEY,
     DEFAULT_LENGTH,
     MAX_ENCODED_CHARS,
     MAX_ITERATIONS,
@@ -20,27 +22,32 @@ from .codec import (
     Header,
     decode,
     decode_bytes,
+    decrypt,
     encode,
     encode_bytes,
+    encrypt,
     parse_header,
 )
 from .errors import (
     DecodingError,
+    DecryptionError,
     EncodingError,
     InvalidNameError,
     KeyStoreError,
     TableNotFoundError,
+    TokenExpiredError,
     UnsupportedCharacterError,
     YaceError,
 )
 from .keystore import ENV_VAR, Family, ImportResult, KeyStore, default_keystore_path
 from .tables import MAX_LENGTH, MIN_LENGTH, SUPPORTED_CHARACTERS, Table
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "DEFAULT_FAMILY",
     "DEFAULT_ITERATIONS",
+    "DEFAULT_KEY",
     "DEFAULT_LENGTH",
     "ENV_VAR",
     "MAX_ENCODED_CHARS",
@@ -50,6 +57,7 @@ __all__ = [
     "SUPPORTED_CHARACTERS",
     "Codec",
     "DecodingError",
+    "DecryptionError",
     "EncodingError",
     "Family",
     "Header",
@@ -59,13 +67,16 @@ __all__ = [
     "KeyStoreError",
     "Table",
     "TableNotFoundError",
+    "TokenExpiredError",
     "UnsupportedCharacterError",
     "YaceError",
     "__version__",
     "decode",
     "decode_bytes",
+    "decrypt",
     "default_keystore_path",
     "encode",
     "encode_bytes",
+    "encrypt",
     "parse_header",
 ]

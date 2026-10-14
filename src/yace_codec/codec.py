@@ -15,18 +15,22 @@ Encoding ``text`` with family ``name``, code length ``L`` and ``I`` iterations:
 Decoding undoes the steps in reverse order with the same tables. This is the
 format of the original YACE scripts, so their tokens and ``encodings.json``
 files keep working.
+
+:meth:`Codec.encrypt` and :meth:`Codec.decrypt` make encrypted "yace2" tokens
+instead; see :mod:`yace_codec.sealed`.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
-import codecs
 import os
 import secrets
 from random import Random
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
 
+from . import sealed
+from ._text import TokenLike, token_text
 from .errors import DecodingError, EncodingError, UnsupportedCharacterError
 from .keystore import KeyStore
 from .tables import (
@@ -44,6 +48,7 @@ from .tables import (
 __all__ = [
     "DEFAULT_FAMILY",
     "DEFAULT_ITERATIONS",
+    "DEFAULT_KEY",
     "DEFAULT_LENGTH",
     "MAX_ENCODED_CHARS",
     "MAX_ITERATIONS",
@@ -51,13 +56,17 @@ __all__ = [
     "Header",
     "decode",
     "decode_bytes",
+    "decrypt",
     "encode",
     "encode_bytes",
+    "encrypt",
     "parse_header",
 ]
 
 #: Family used when no name is given.
 DEFAULT_FAMILY = "default"
+#: Secret key used by :meth:`Codec.encrypt` when no key or password is given.
+DEFAULT_KEY = "default"
 #: Default code length (``hash_length`` in the original scripts).
 DEFAULT_LENGTH = 2
 #: Default number of encoding layers (``final_hash_iteration`` in the original scripts).
@@ -70,17 +79,9 @@ MAX_ENCODED_CHARS = 2**25
 
 _CODE_CHARS = frozenset(CODE_ALPHABET)
 _SYSTEM_RANDOM = secrets.SystemRandom()
-# UTF-32 first: its little-endian BOM starts with the UTF-16 one.
-_BOMS = (
-    (codecs.BOM_UTF32_LE, "utf-32"),
-    (codecs.BOM_UTF32_BE, "utf-32"),
-    (codecs.BOM_UTF8, "utf-8-sig"),
-    (codecs.BOM_UTF16_LE, "utf-16"),
-    (codecs.BOM_UTF16_BE, "utf-16"),
-)
 
 KeyStoreLike = Union[KeyStore, str, "os.PathLike[str]", None]
-TokenLike = Union[str, bytes, bytearray]
+BytesLike = Union[bytes, bytearray, memoryview]
 
 
 class Header(NamedTuple):
@@ -233,6 +234,90 @@ class Codec:
             raise DecodingError(
                 "the decoded text is not base64; was the token made with encode_bytes()?"
             ) from exc
+
+    def encrypt(
+        self,
+        data: Union[str, BytesLike],
+        key: Optional[str] = None,
+        *,
+        password: Optional[str] = None,
+    ) -> str:
+        """Encrypt ``data`` (any text or bytes) into a ``yace2_`` token.
+
+        Without a ``password``, the secret key named ``key`` (default
+        ``"default"``) from the key store is used, and generated on first use.
+        With a ``password``, no key store is needed. The token does not reveal
+        the key name, the exact length, or anything else about the data.
+        """
+        if key is not None and password is not None:
+            raise TypeError("pass either key or password, not both")
+        if isinstance(data, str):
+            try:
+                raw, is_text = data.encode("utf-8"), True
+            except UnicodeEncodeError:
+                raise EncodingError("the text contains characters that are not valid Unicode") from None
+        elif isinstance(data, (bytes, bytearray, memoryview)):
+            raw, is_text = bytes(data), False
+        else:
+            raise TypeError(f"data must be str or bytes-like, not {type(data).__name__}")
+        if password is not None:
+            if not isinstance(password, str):
+                raise TypeError("password must be str")
+            return sealed.seal(raw, text=is_text, password=password)
+        secret = self.keystore.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)
+        return sealed.seal(raw, text=is_text, key=secret)
+
+    def decrypt(
+        self,
+        token: TokenLike,
+        *,
+        password: Optional[str] = None,
+        max_age: Optional[float] = None,
+    ) -> Union[str, bytes]:
+        """Decrypt a token made by :meth:`encrypt`.
+
+        Returns ``str`` for text and ``bytes`` for bytes, as they were encrypted.
+        Without a ``password``, every key in the key store is tried. With
+        ``max_age`` (seconds), older tokens raise
+        :class:`~yace_codec.errors.TokenExpiredError`. A wrong key or password,
+        or any change to the token, raises
+        :class:`~yace_codec.errors.DecryptionError`.
+        """
+        if password is not None:
+            data, is_text = sealed.unseal(token, password=password, max_age=max_age)
+        else:
+            keys = [self.keystore.get_key(name) for name in self.keystore.key_names()]
+            data, is_text = sealed.unseal(token, keys=keys, max_age=max_age)
+        return data.decode("utf-8") if is_text else data
+
+
+def encrypt(
+    data: Union[str, BytesLike],
+    key: Optional[str] = None,
+    *,
+    password: Optional[str] = None,
+    keystore: KeyStoreLike = None,
+) -> str:
+    """Encrypt ``data``; shortcut for ``Codec(keystore).encrypt(...)``.
+
+    With a ``password``, the key store is not used at all.
+    """
+    if password is not None and keystore is None and key is None:
+        return Codec(KeyStore.in_memory()).encrypt(data, password=password)
+    return Codec(keystore).encrypt(data, key, password=password)
+
+
+def decrypt(
+    token: TokenLike,
+    *,
+    password: Optional[str] = None,
+    max_age: Optional[float] = None,
+    keystore: KeyStoreLike = None,
+) -> Union[str, bytes]:
+    """Decrypt a token; shortcut for ``Codec(keystore).decrypt(...)``."""
+    if password is not None and keystore is None:
+        return Codec(KeyStore.in_memory()).decrypt(token, password=password, max_age=max_age)
+    return Codec(keystore).decrypt(token, password=password, max_age=max_age)
 
 
 def encode(
@@ -457,22 +542,11 @@ def _drop_shared_bins(
 
 
 def _split_token(token: TokenLike) -> Tuple[Header, str]:
-    if isinstance(token, (bytes, bytearray)):
-        raw = bytes(token)
-        # Windows tools often add a byte order mark (and PowerShell 5.1 writes UTF-16).
-        encoding = next((enc for bom, enc in _BOMS if raw.startswith(bom)), "utf-8")
-        try:
-            token = raw.decode(encoding)
-        except UnicodeDecodeError:
-            raise DecodingError(
-                "a token must be text: UTF-8, or UTF-16/UTF-32 with a byte order mark"
-            ) from None
-    elif not isinstance(token, str):
-        raise TypeError(f"token must be str or bytes, not {type(token).__name__}")
-    text = token[1:] if token.startswith("\ufeff") else token
-    stripped = text.strip()
+    stripped = token_text(token).strip()
     if not stripped:
         raise DecodingError("the token is empty")
+    if sealed.is_sealed(stripped):
+        raise DecodingError("this is an encrypted yace2 token; use decrypt()")
     # The header is the first line. The original scripts allowed spaces in family
     # names, so try the whole line first, then "header body" on a single line.
     first_line, _, body = stripped.partition("\n")
