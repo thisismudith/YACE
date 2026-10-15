@@ -18,7 +18,9 @@ from .errors import EncodingError, KeyStoreError, UnsupportedCharacterError, Yac
 from .keystore import ENV_VAR, KeyStore, family_of
 
 PROG = "yace-codec"
-#: Environment variable that supplies the password for --password (for scripts).
+#: Environment variables that supply the secret token for --token (for scripts).
+#: The first one that is set wins; YACE_CODEC_PASSWORD is the 0.2.0 name.
+TOKEN_ENV_VAR = "YACE_CODEC_TOKEN"
 PASSWORD_ENV_VAR = "YACE_CODEC_PASSWORD"
 
 
@@ -63,7 +65,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
         description="Encode and decode text with YACE substitution tables (obfuscation), "
-        "or encrypt and decrypt it into yace2 tokens (encryption).",
+        "or encrypt and decrypt it with your own secret token or a stored key (encryption).",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(title="commands", metavar="COMMAND")
@@ -101,32 +103,32 @@ def _build_parser() -> argparse.ArgumentParser:
     dec.set_defaults(handler=_cmd_decode)
 
     encr = commands.add_parser(
-        "encrypt", parents=[store], help="encrypt text or a file into a yace2 token"
+        "encrypt", parents=[store], help="encrypt text or a file into letters and digits"
     )
     encr.add_argument("input", nargs="?", default="-", help="file to encrypt (default: stdin)")
     encr.add_argument("-t", "--text", help="encrypt this string instead of INPUT")
-    encr.add_argument("-o", "--output", metavar="PATH", help="write the token here (default: stdout)")
+    encr.add_argument("-o", "--output", metavar="PATH", help="write the result here (default: stdout)")
     secret = encr.add_mutually_exclusive_group()
     secret.add_argument(
         "--key", metavar="NAME",
         help="secret key in the key store (default: default; created on first use)",
     )
     secret.add_argument(
-        "-p", "--password", action="store_true",
-        help=f"use a password instead of a stored key (asked for, or ${PASSWORD_ENV_VAR})",
+        "-p", "--token", "--password", dest="token", action="store_true",
+        help=f"use your own secret token instead of a stored key (asked for, or ${TOKEN_ENV_VAR})",
     )
     encr.set_defaults(handler=_cmd_encrypt)
 
-    decr = commands.add_parser("decrypt", parents=[store], help="decrypt a yace2 token")
-    decr.add_argument("input", nargs="?", default="-", help="file holding the token (default: stdin)")
-    decr.add_argument("-t", "--text", help="decrypt this token string instead of INPUT")
+    decr = commands.add_parser("decrypt", parents=[store], help="decrypt the output of encrypt")
+    decr.add_argument("input", nargs="?", default="-", help="file to decrypt (default: stdin)")
+    decr.add_argument("-t", "--text", help="decrypt this string instead of INPUT")
     decr.add_argument("-o", "--output", metavar="PATH", help="write the result here (default: stdout)")
     decr.add_argument(
-        "-p", "--password", action="store_true",
-        help=f"the token was made with a password (asked for, or ${PASSWORD_ENV_VAR})",
+        "-p", "--token", "--password", dest="token", action="store_true",
+        help=f"it was encrypted with your own secret token (asked for, or ${TOKEN_ENV_VAR})",
     )
     decr.add_argument(
-        "--max-age", type=float, metavar="SECONDS", help="reject tokens older than this"
+        "--max-age", type=float, metavar="SECONDS", help="reject data encrypted longer ago than this"
     )
     decr.set_defaults(handler=_cmd_decrypt)
 
@@ -303,35 +305,36 @@ def _cmd_encrypt(args: argparse.Namespace) -> int:
     if args.text is not None:
         with contextlib.suppress(UnicodeDecodeError):
             data = raw.decode("utf-8")  # so Python's decrypt() returns str
-    if args.password:
-        token = Codec(KeyStore.in_memory()).encrypt(data, password=_password(confirm=True))
+    if args.token:
+        result = Codec(KeyStore.in_memory()).encrypt(data, token=_secret_token(confirm=True))
     else:
-        token = Codec(_keystore(args)).encrypt(data, args.key)
-    _write_output(args.output, f"{token}\n".encode("ascii"))
+        result = Codec(_keystore(args)).encrypt(data, args.key)
+    _write_output(args.output, f"{result}\n".encode("ascii"))
     return 0
 
 
 def _cmd_decrypt(args: argparse.Namespace) -> int:
     raw = _read_input(args)
-    if args.password:
+    if args.token:
         codec = Codec(KeyStore.in_memory())
-        result = codec.decrypt(raw, password=_password(), max_age=args.max_age)
+        result = codec.decrypt(raw, token=_secret_token(), max_age=args.max_age)
     else:
         result = Codec(_keystore(args)).decrypt(raw, max_age=args.max_age)
     _write_output(args.output, result.encode("utf-8") if isinstance(result, str) else result)
     return 0
 
 
-def _password(*, confirm: bool = False) -> str:
-    from_env = os.environ.get(PASSWORD_ENV_VAR)
-    if from_env:
-        return from_env
-    password = getpass.getpass("Password: ")
-    if not password:
-        raise EncodingError("the password is empty")
-    if confirm and getpass.getpass("Repeat password: ") != password:
-        raise EncodingError("the passwords do not match")
-    return password
+def _secret_token(*, confirm: bool = False) -> str:
+    for name in (TOKEN_ENV_VAR, PASSWORD_ENV_VAR):
+        from_env = os.environ.get(name)
+        if from_env:
+            return from_env
+    secret = getpass.getpass("Secret token: ")
+    if not secret:
+        raise EncodingError("the secret token is empty")
+    if confirm and getpass.getpass("Repeat secret token: ") != secret:
+        raise EncodingError("the secret tokens do not match")
+    return secret
 
 
 def _cmd_keys_list(args: argparse.Namespace) -> int:

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "yace-codec"
 dynamic = ["version"]
-description = "YACE (Yet Another Custom Encoder): reversible text encoding with random substitution tables, plus authenticated encryption into yace2 tokens, with no dependencies."
+description = "YACE (Yet Another Custom Encoder): reversible text encoding with random substitution tables, plus authenticated encryption with your own secret token, with no dependencies."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"

@@ -8,7 +8,7 @@ substitution tables.
 'Hello, World!'
 
 encode()/decode() only obfuscate text. For secrets, use encrypt()/decrypt(),
-which make encrypted "yace2" tokens.
+which encrypt with your own secret token or a stored key.
 """
 
 from .codec import (
@@ -42,7 +42,7 @@ from .errors import (
 from .keystore import ENV_VAR, Family, ImportResult, KeyStore, default_keystore_path
 from .tables import MAX_LENGTH, MIN_LENGTH, SUPPORTED_CHARACTERS, Table
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 __all__ = [
     "DEFAULT_FAMILY",

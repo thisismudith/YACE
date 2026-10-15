@@ -259,7 +259,7 @@ class KeyStore:
         incoming = {name: Table.from_dict(name, raw).to_dict() for name, raw in tables.items()}
         return self._import(incoming, overwrite, _normalised, "table")
 
-    # Secret keys for encrypted (yace2) tokens -------------------------------
+    # Secret keys for encrypt() and decrypt() ---------------------------------
 
     def key_names(self) -> List[str]:
         """Return the names of the stored secret keys, sorted."""

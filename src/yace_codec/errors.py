@@ -53,7 +53,7 @@ class DecodingError(YaceError, ValueError):
 
 
 class DecryptionError(DecodingError):
-    """An encrypted token cannot be opened: wrong key or password, or it was changed."""
+    """Encrypted data cannot be opened: wrong key or secret token, or it was changed."""
 
 
 class TokenExpiredError(DecryptionError):

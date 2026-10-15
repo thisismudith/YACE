@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-10-15
+
+### Added
+
+- `encrypt(data, token=...)` and `decrypt(encrypted, token=...)`: choose your own
+  secret token (any non-empty text or bytes). With a token, nothing is generated or
+  stored. Without one, a key is generated and kept in the key store, as before.
+- `yace-codec encrypt --token` and `decrypt --token` ask for the secret token, or
+  read `YACE_CODEC_TOKEN`.
+
+### Changed
+
+- Encrypted output is only letters and digits, with no `yace2_` prefix, so it does
+  not reveal that YACE made it. Output from 0.2.0 still decrypts.
+- `decrypt()`'s first parameter is named `encrypted` (it was `token`).
+- `password=`, `--password`, and `YACE_CODEC_PASSWORD` remain as other names for
+  `token=`, `--token`, and `YACE_CODEC_TOKEN`.
+
 ## [0.2.0] - 2026-10-14
 
 ### Added

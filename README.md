@@ -1,6 +1,6 @@
 # YACE
 
-**Reversible text encoding with random substitution tables, and authenticated encryption into `yace2` tokens.**
+**Reversible text encoding with random substitution tables, and authenticated encryption with your own secret token.**
 
 [![PyPI](https://img.shields.io/pypi/v/yace-codec)](https://pypi.org/project/yace-codec/)
 [![Python versions](https://img.shields.io/pypi/pyversions/yace-codec)](https://pypi.org/project/yace-codec/)
@@ -12,9 +12,9 @@ the `yace-codec` command, with no third-party dependencies:
 - **Encoding** (`encode`/`decode`) turns text into tokens of random-looking letters
   and digits with YACE's substitution tables. It hides text from casual reading,
   but it is not encryption.
-- **Encryption** (`encrypt`/`decrypt`) turns any text or file into a `yace2_` token
-  that reveals nothing but its approximate size, and that only the matching key or
-  password can open.
+- **Encryption** (`encrypt`/`decrypt`) turns any text or file into letters and
+  digits that reveal nothing but their approximate size. Only your secret token
+  (or a stored key, if you choose none) can open them.
 
 | | |
 |---|---|
@@ -39,7 +39,7 @@ exporter.
 - [How the encoder works](#how-the-encoder-works)
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Encryption (yace2 tokens)](#encryption-yace2-tokens)
+- [Encryption](#encryption)
 - [Command line](#command-line)
 - [API reference](#api-reference)
 - [The key store](#the-key-store)
@@ -54,8 +54,8 @@ exporter.
 
 Common encodings such as base64 or hex are public mappings, so anyone can reverse
 them. Decoding a YACE token needs the tables in your key store, and encoding the same
-text twice usually gives two different tokens. Encrypted `yace2` tokens go further:
-without the key or password they cannot be read, linked to their key, or changed
+text twice usually gives two different tokens. Encryption goes further: without
+your secret token or key, the output cannot be read, linked to its key, or changed
 without detection.
 
 You can use YACE to:
@@ -64,18 +64,18 @@ You can use YACE to:
   game content, test fixtures, or messages for people you share tables with);
 - produce plain ASCII output: a short header line followed by a body of letters and
   digits only;
-- encrypt messages and files for people who share a key or a password with you;
+- encrypt messages and files for people who share a secret token or key with you;
 - learn how substitution, homophones, nulls, and transposition combine in classical
   ciphers.
 
 | | base64 / hex | YACE `encode` | YACE `encrypt` | Fernet (`cryptography`) |
 |---|---|---|---|---|
-| Who can read it | anyone | holders of the tables, or an attacker with enough samples | holders of the key or password | holders of the key |
+| Who can read it | anyone | holders of the tables, or an attacker with enough samples | holders of the secret token or key | holders of the key |
 | Same input, same output | yes | usually not | no | no |
 | Resists cryptanalysis | no | no | designed to (standard primitives, not audited) | yes (audited) |
 | Detects tampering | no | no (only some corruption) | yes | yes |
 | Hides the length | no | no | roughly (Padmé padding) | no |
-| Output size | 1.33x / 2x | about 1.25 x length<sup>iterations</sup> | about 1.4x plus about 95 characters | about 1.33x plus a fixed overhead |
+| Output size | 1.33x / 2x | about 1.25 x length<sup>iterations</sup> | about 1.4x plus about 90 characters | about 1.33x plus a fixed overhead |
 
 ## How the encoder works
 
@@ -345,68 +345,77 @@ assert make_token() == make_token()
 More runnable scripts are in
 [`examples/`](https://github.com/thisismudith/YACE/tree/main/examples).
 
-## Encryption (yace2 tokens)
+## Encryption
 
-`encrypt()` turns any text or bytes into a `yace2_` token, and `decrypt()` turns it
-back:
+`encrypt()` turns any text or bytes into letters and digits, and `decrypt()` turns
+them back. Choose your own secret token, and pass the same one to decrypt:
 
 ```python
-token = yace.encrypt("Meet at the north gate at 06:00.")
-print(token)
-print(yace.decrypt(token))
+secret = yace.encrypt("Meet at the north gate at 06:00.", token="blue-falcon-42")
+print(secret)
+print(yace.decrypt(secret, token="blue-falcon-42"))
 ```
 
 ```text
-yace2_5a5Hfi0rCH1GDypoUqaZ0C2doMT8ZgvPx3TdjOC4G7Zi4afClySrDuTJDBs38qfnIMITLJWJXXtwE3kzFZl77cPY1vmbl740V6h2Dk7H8DdQAP8CUd2AgCPsrIFJKI8j02wB2jawa0
+3EH3rNDTPGnDlvRImekvmFAwBLPIwRdlI4aTqyfRXG335c06JkRK6e34mxOWK6VIm1Hin7pN1xddMH3FrG6xPd1t8YLuUIOuWydDezMJAgn7ndD1D8K6quWisJBc9JyVFOWE1Aq5xb
 Meet at the north gate at 06:00.
 ```
 
-By default the secret key named `default` in the [key store](#the-key-store) is used,
-and it is generated on first use. `decrypt()` tries every key in the key store, so a
-token never names its key. Choose another key with `yace.encrypt(data, "team")`.
+The token can be any non-empty text or bytes. With a token, nothing is generated or
+stored, and no key store is involved. Anyone who knows the token can decrypt, so
+choose a long one that is hard to guess.
 
-With a password instead of a stored key, no key store is involved:
+Without a token, YACE generates a random key for you, stores it in the
+[key store](#the-key-store) as `default`, and reuses it:
 
 ```python
-token = yace.encrypt("for your eyes only", password="correct horse battery staple")
-print(yace.decrypt(token, password="correct horse battery staple"))
+secret = yace.encrypt("Meet at the north gate at 06:00.")
+print(secret)
+print(yace.decrypt(secret))
 ```
 
 ```text
-for your eyes only
+Htun1NlqKRe8UnQ6To3lBB8ZK9f5NYpzDFkIW9RQrpgwEFQzSMJVYUv8n9AevttNK84oVKc8nEK9C1vX5BAXxunX9VJCVfXTN062Fh3Fk8jivV3mRkvxsUwWRARfBnTaIdq61OSTbb
+Meet at the north gate at 06:00.
 ```
+
+`decrypt()` tries every key in the key store, so the output never names its key.
+Choose another stored key with `yace.encrypt(data, "team")`.
 
 `decrypt()` returns `str` for text and `bytes` for bytes. It also offers:
 
-- `max_age`: `yace.decrypt(token, max_age=3600)` rejects tokens made more than an hour
-  ago with `TokenExpiredError`.
-- Tamper detection: a wrong key or password, or any change to the token, raises
+- `max_age`: `yace.decrypt(secret, max_age=3600)` rejects data encrypted more than an
+  hour ago with `TokenExpiredError`.
+- Tamper detection: a wrong token or key, or any change to the encrypted text, raises
   `DecryptionError`.
-- Key sharing: export a key with `KeyStore.export_key("team")` (CLI:
+- Key sharing: export a stored key with `KeyStore.export_key("team")` (CLI:
   `yace-codec keys export team`) and import it with
   `import_keys(data, name="team")` (CLI: `yace-codec keys import FILE --name team`).
-  Anyone with the key can read and create tokens for it.
+  Anyone with the key can decrypt and encrypt with it.
 
-### What a yace2 token reveals
+`password=` is another name for `token=`, kept from version 0.2.0. Output from 0.2.0
+starts with `yace2_`; it still decrypts.
 
-Only that it is a yace2 token, and roughly how long the data is: the size is padded
-to a Padmé length, which leaks at most a few bits. The key name, the exact length,
-the creation time, and whether the data was text or bytes are all encrypted. The same
-data gives a different token every time.
+### What the encrypted text reveals
+
+Only roughly how long the data is: the size is padded to a Padmé length, which leaks
+at most a few bits. It has no prefix or header, so it does not say that YACE made it.
+The key name, the exact length, the creation time, and whether the data was text or
+bytes are all encrypted. The same data gives different output every time.
 
 ### How encryption works
 
-1. A random 16-byte salt is drawn for every token.
-2. The secret is a 32-byte key from the key store, or the password stretched with
-   scrypt (N = 2<sup>17</sup>, r = 8, p = 1) and the salt.
+1. A random 16-byte salt is drawn every time.
+2. The secret is your token stretched with scrypt (N = 2<sup>17</sup>, r = 8, p = 1)
+   and the salt, or a 32-byte key from the key store.
 3. HKDF-SHA256 (RFC 5869) derives two keys from the secret and the salt: one to
-   encrypt and one to authenticate. Every token gets its own pair.
+   encrypt and one to authenticate. Every output gets its own pair.
 4. A frame holds the data type, the creation time, the length, the data, and zero
    padding up to a Padmé length.
 5. The frame is XORed with a keystream of HMAC-SHA256 blocks in counter mode.
-6. An HMAC-SHA256 tag covers the prefix, the salt, and the ciphertext. Decryption
-   checks it first, with a constant-time comparison, so wrong keys and changed tokens
-   are rejected before anything is decrypted.
+6. An HMAC-SHA256 tag covers the salt and the ciphertext. Decryption checks it
+   first, with a constant-time comparison, so wrong secrets and changed text are
+   rejected before anything is decrypted.
 7. The salt, ciphertext, and tag are written as letters and digits: every 8 bytes
    become 11 characters ("YACE62").
 
@@ -448,30 +457,34 @@ $ yace-codec decode --binary photo.yace -o photo-copy.jpg
 Encrypt and decrypt (any file works, byte for byte):
 
 ```console
-$ yace-codec encrypt --text "Meet at the north gate at 06:00."
-yace2_JHVUvAKzCjE56fROwZRSVk3L7Y4zpVFHXJlRuiF4Mb2lK0IjhXOy7fv6tTg9sDdyRxIYUG5RC0WS7CNhi073vj6AAcx3VS651sTFbvYWVvSEi669m6KEXB52AKvdzmQ7RM9L3sAiO5
+$ yace-codec encrypt --token --text "Meet at the north gate at 06:00."
+Secret token:
+Repeat secret token:
+3EH3rNDTPGnDlvRImekvmFAwBLPIwRdlI4aTqyfRXG335c06JkRK6e34mxOWK6VIm1Hin7pN1xddMH3FrG6xPd1t8YLuUIOuWydDezMJAgn7ndD1D8K6quWisJBc9JyVFOWE1Aq5xb
 
-$ yace-codec encrypt secret.pdf -o secret.yace --key team
-$ yace-codec decrypt secret.yace -o secret-copy.pdf
-
-$ yace-codec encrypt --password notes.txt -o notes.yace
-Password:
-Repeat password:
-$ yace-codec decrypt --password notes.yace
-Password:
+$ yace-codec encrypt --token notes.txt -o notes.yace
+Secret token:
+Repeat secret token:
+$ yace-codec decrypt --token notes.yace
+Secret token:
 Shopping list:
 - milk
 - 12 eggs
+
+$ yace-codec encrypt secret.pdf -o secret.yace --key team
+$ yace-codec decrypt secret.yace -o secret-copy.pdf
 
 $ yace-codec keys list
 default
 team
 ```
 
-`--password` asks for the password (twice when encrypting). Scripts can set
-`YACE_CODEC_PASSWORD` instead, but other programs running as you may be able to
-read environment variables. `keys import` needs `--name NAME` (or `--all-keys`), for
-the same reason as `tables import` below.
+`--token` (or `-p`) asks for your secret token (twice when encrypting), so it never
+appears in your shell history. Without `--token`, a stored key is used. Scripts can
+set `YACE_CODEC_TOKEN` instead, but other programs running as you may be able to
+read environment variables. `--password` and `YACE_CODEC_PASSWORD`, from 0.2.0,
+still work. `keys import` needs `--name NAME` (or `--all-keys`), for the same
+reason as `tables import` below.
 
 Inspect and share tables:
 
@@ -510,8 +523,8 @@ yace-codec: error: groceries.json holds tables for: groceries. Name the family y
 | `tables list` | `-k/--keystore PATH` |
 | `tables export NAME` | `-o/--output PATH`, `-k/--keystore PATH` |
 | `tables import FILE` | `--family NAME` or `--all-families` (one is required), `--overwrite`, `-k/--keystore PATH` (use `-` as `FILE` for standard input) |
-| `encrypt [INPUT]` | `-t/--text TEXT`, `-o/--output PATH`, `--key NAME` (default `default`) or `-p/--password`, `-k/--keystore PATH` |
-| `decrypt [INPUT]` | `-t/--text TOKEN`, `-o/--output PATH`, `-p/--password`, `--max-age SECONDS`, `-k/--keystore PATH` |
+| `encrypt [INPUT]` | `-t/--text TEXT`, `-o/--output PATH`, `--key NAME` (default `default`) or `-p/--token`, `-k/--keystore PATH` |
+| `decrypt [INPUT]` | `-t/--text TEXT`, `-o/--output PATH`, `-p/--token`, `--max-age SECONDS`, `-k/--keystore PATH` |
 | `keys list` | `-k/--keystore PATH` |
 | `keys export NAME` | `-o/--output PATH`, `-k/--keystore PATH` |
 | `keys import FILE` | `--name NAME` or `--all-keys` (one is required), `--overwrite`, `-k/--keystore PATH` |
@@ -533,8 +546,8 @@ Everything below is importable from `yace_codec`.
 | `decode(token, *, keystore=None) -> str` | Decode a token: a `str`, or `bytes` in UTF-8 (UTF-16 and UTF-32 need a byte order mark). |
 | `encode_bytes(data, name="default", *, length=2, iterations=3, keystore=None) -> str` | Encode any bytes (base64 first). |
 | `decode_bytes(token, *, keystore=None) -> bytes` | Decode a token made by `encode_bytes`. |
-| `encrypt(data, key=None, *, password=None, keystore=None) -> str` | Encrypt text or bytes into a `yace2_` token, with a stored key (default `"default"`) or a password. |
-| `decrypt(token, *, password=None, max_age=None, keystore=None) -> str \| bytes` | Decrypt a `yace2_` token; returns `str` or `bytes`, as encrypted. |
+| `encrypt(data, key=None, *, token=None, keystore=None) -> str` | Encrypt text or bytes into letters and digits, with your own secret `token` (text or bytes) or a stored key (default `"default"`, generated on first use). |
+| `decrypt(encrypted, *, token=None, max_age=None, keystore=None) -> str \| bytes` | Decrypt the output of `encrypt`; returns `str` or `bytes`, as encrypted. |
 | `parse_header(token) -> Header` | Read a token's header without decoding it. |
 | `default_keystore_path() -> pathlib.Path` | Where the default key store lives (an absolute path). |
 
@@ -595,8 +608,8 @@ YaceError
 ├── EncodingError              invalid settings (also a ValueError)
 │   └── UnsupportedCharacterError   .characters, .table_name
 ├── DecodingError              malformed or corrupted token, or wrong tables (also a ValueError)
-│   └── DecryptionError        a yace2 token cannot be opened: wrong key or password, or changed
-│       └── TokenExpiredError  the token is older than max_age
+│   └── DecryptionError        encrypted text cannot be opened: wrong token or key, or changed
+│       └── TokenExpiredError  it was encrypted longer ago than max_age
 ├── TableNotFoundError         a needed table is missing; .table_name (also a LookupError)
 └── KeyStoreError              unreadable, invalid, or unwritable key store
 ```
@@ -670,8 +683,8 @@ encrypted with its keys becomes unreadable. Anyone who has it can read those tok
   token character, so tokens near the size limit need 1–2 GB. YACE is meant for
   strings and small to medium files, not streams.
 - **Empty input.** Encoding `""` gives a header-only token, which decodes to `""`.
-- **Encryption size.** `encrypt()` holds the data and the token in memory. Tokens
-  are about 1.4 times the size of the data, plus about 95 characters.
+- **Encryption size.** `encrypt()` holds the data and the output in memory. The
+  output is about 1.4 times the size of the data, plus about 90 characters.
 - **Whitespace.** Decoding ignores whitespace in a token, so wrapped lines, CRLF line
   endings, and leading blank lines are fine.
 - **Corruption.** Decoding raises `DecodingError` when a chunk is not a valid code,
@@ -708,17 +721,19 @@ encrypted with its keys becomes unreadable. Anyone who has it can read those tok
 ### Encryption (`encrypt`)
 
 - Confidentiality and integrity rest on HMAC-SHA256 as a pseudorandom function (for
-  the keystream and the tag), HKDF-SHA256 for per-token keys, and scrypt for
-  passwords. These are standard, well-studied constructions, but this project
+  the keystream and the tag), HKDF-SHA256 for per-output keys, and scrypt for
+  secret tokens. These are standard, well-studied constructions, but this project
   assembled them and nobody has audited the result. For high-stakes secrets, use an
   audited library such as [`cryptography`](https://cryptography.io/).
-- A password token is only as strong as its password. scrypt makes each guess slow,
-  but a short or common password can still be found. Stored keys are 32 random bytes.
-- The key store holds the keys: anyone who copies it can open every token made with
-  its keys. Password tokens do not depend on the key store.
-- Tokens hide the key name, the creation time, and the exact length, but not roughly
-  how long the data is, or that YACE made them.
-- There is no forward secrecy (a leaked key opens all earlier tokens made with it),
+- Encryption with your own token is only as strong as the token. scrypt makes each
+  guess slow, but a short or common token can still be found. Stored keys are 32
+  random bytes.
+- The key store holds the keys: anyone who copies it can open everything encrypted
+  with its keys. Encryption with your own token does not depend on the key store.
+- The output hides the key name, the creation time, and the exact length, but not
+  roughly how long the data is.
+- There is no forward secrecy (a leaked token or key opens everything encrypted
+  with it earlier),
   and pure Python gives no protection against attackers who can measure timing or
   memory on your machine.
 
