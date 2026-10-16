@@ -45,7 +45,9 @@ classifiers = [
 dependencies = ["cryptography>=42"]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "hypothesis>=6.100"]
+aead = ["cryptography>=42"]
+keyring = ["keyring>=24"]
+test = ["pytest>=8", "hypothesis>=6.100", "keyring>=24"]
 
 [project.urls]
 Homepage = "https://github.com/thisismudith/YACE"

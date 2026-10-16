@@ -27,6 +27,7 @@ from pathlib import Path
 from random import Random
 from typing import Any, Callable, Dict, Iterator, List, Mapping, NamedTuple, Optional, Tuple, Union
 
+from ._winsec import restrict_to_owner
 from .errors import KeyStoreError, TableNotFoundError, YaceError
 from .sealed import KEY_SIZE
 from .tables import Table, parse_table_name, table_name, validate_family
@@ -260,6 +261,9 @@ class KeyStore:
         return self._import(incoming, overwrite, _normalised, "table")
 
     # Secret keys for encrypt() and decrypt() ---------------------------------
+    #
+    # A key entry is "key:<name>": {"secret": <base64 of 32 bytes>} plus, after
+    # rotate_key(), "retired": [<base64>, ...]. Version 0.2 reads only "secret".
 
     def key_names(self) -> List[str]:
         """Return the names of the stored secret keys, sorted."""
@@ -268,12 +272,8 @@ class KeyStore:
 
     def find_key(self, name: str) -> Optional[bytes]:
         """Return the secret key ``name``, or ``None`` if the store does not have it."""
-        with self._lock:
-            data = self._loaded()
-            entry = _KEY_PREFIX + name
-            if entry not in data:
-                return None
-            return _parse_key(entry, data[entry])
+        record = self._find_record(name)
+        return None if record is None else record.current
 
     def get_key(self, name: str) -> bytes:
         """Return the secret key ``name``; raise TableNotFoundError if it is missing."""
@@ -281,6 +281,13 @@ class KeyStore:
         if key is None:
             raise TableNotFoundError(f"key {name!r} is not in {self._describe()}", name)
         return key
+
+    def decryption_keys(self) -> List[bytes]:
+        """Return every key that may open a token: current keys first, then retired ones."""
+        with self._lock:
+            data = self._loaded()
+            records = [self._decode_record(entry, data[entry]) for entry in sorted(data) if _is_key_entry(entry)]
+        return [record.current for record in records] + [key for record in records for key in record.retired]
 
     def ensure_key(self, name: str, *, rng: Optional[Random] = None) -> bytes:
         """Return the secret key ``name``, generating and saving it if it is missing.
@@ -294,17 +301,40 @@ class KeyStore:
             if entry not in self._loaded():
                 with self._editing() as data:
                     if entry not in data:
-                        secret = (
-                            secrets.token_bytes(KEY_SIZE)
-                            if rng is None
-                            else bytes(rng.getrandbits(8) for _ in range(KEY_SIZE))
-                        )
-                        data[entry] = _key_entry(secret)
+                        data[entry] = self._encode_record(_KeyRecord(_new_key(rng), ()))
             return self.get_key(name)
 
-    def export_key(self, name: str) -> Dict[str, Dict[str, str]]:
-        """Return the secret key ``name`` as key-store JSON, for :meth:`import_keys`."""
-        return {_KEY_PREFIX + name: _key_entry(self.get_key(name))}
+    def rotate_key(self, name: str, *, rng: Optional[Random] = None) -> bytes:
+        """Give ``name`` a new random key and return it.
+
+        The previous key is kept as a retired key: :meth:`decryption_keys` still
+        returns it, so older tokens keep decrypting, but new tokens use the new
+        key. A missing key is created.
+        """
+        validate_family(name)
+        entry = _KEY_PREFIX + name
+        key = _new_key(rng)
+        with self._lock, self._editing() as data:
+            old = self._decode_record(entry, data[entry]) if entry in data else None
+            retired = () if old is None else (old.current,) + old.retired
+            data[entry] = self._encode_record(_KeyRecord(key, retired))
+        return key
+
+    def delete_key(self, name: str) -> None:
+        """Delete the key ``name`` and its retired keys. Tokens made with them become unreadable."""
+        entry = _KEY_PREFIX + name
+        with self._lock:
+            if entry not in self._loaded():
+                raise TableNotFoundError(f"key {name!r} is not in {self._describe()}", name)
+            with self._editing() as data:
+                data.pop(entry, None)
+
+    def export_key(self, name: str) -> Dict[str, Dict[str, Any]]:
+        """Return the secret key ``name`` (and its retired keys) as JSON, for :meth:`import_keys`."""
+        record = self._find_record(name)
+        if record is None:
+            raise TableNotFoundError(f"key {name!r} is not in {self._describe()}", name)
+        return {_KEY_PREFIX + name: _key_entry(record)}
 
     def import_keys(
         self,
@@ -321,22 +351,33 @@ class KeyStore:
         exists with a different value is only replaced when ``overwrite`` is
         true, because tokens made with the old key could no longer be opened.
         """
-        if not isinstance(keys, Mapping):
-            raise KeyStoreError("expected a JSON object that maps key entries to keys")
-        if name is not None:
-            keys = {entry: raw for entry, raw in keys.items() if entry == _KEY_PREFIX + name}
-            if not keys:
-                raise KeyStoreError(f"no key named {name!r} to import")
-        incoming: Dict[str, Dict[str, Any]] = {}
-        for entry, raw in keys.items():
-            if not _is_key_entry(entry):
-                raise KeyStoreError(f"{entry!r} is not a key entry ('key:<name>')")
-            try:
-                validate_family(entry[len(_KEY_PREFIX) :])
-            except YaceError as exc:
-                raise KeyStoreError(f"invalid key name in {entry!r}: {exc}") from None
-            incoming[entry] = _key_entry(_parse_key(entry, raw))
-        return self._import(incoming, overwrite, _normalised_key, "key")
+        incoming = parse_key_entries(keys, name)
+        return self._import(
+            incoming, overwrite, self._normalised_key, "key",
+            lambda entry, value: self._encode_record(_parse_key_record(entry, value)),
+        )
+
+    def _find_record(self, name: str) -> Optional[_KeyRecord]:
+        with self._lock:
+            data = self._loaded()
+            entry = _KEY_PREFIX + name
+            if entry not in data:
+                return None
+            return self._decode_record(entry, data[entry])
+
+    # How keys are stored in the file; DpapiKeyStore overrides these two.
+
+    def _encode_record(self, record: _KeyRecord) -> Dict[str, Any]:
+        return _key_entry(record)
+
+    def _decode_record(self, entry: str, raw: Any) -> _KeyRecord:
+        return _parse_key_record(entry, raw)
+
+    def _normalised_key(self, entry: str, raw: Any) -> Optional[Dict[str, Any]]:
+        try:
+            return _key_entry(self._decode_record(entry, raw))
+        except KeyStoreError:
+            return None
 
     def _import(
         self,
@@ -344,6 +385,7 @@ class KeyStore:
         overwrite: bool,
         normalise: Callable[[str, Any], Optional[Dict[str, Any]]],
         what: str,
+        encode: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
     ) -> ImportResult:
         with self._lock:
             result = _plan_import(self._loaded(), incoming, overwrite, normalise, what)
@@ -352,7 +394,8 @@ class KeyStore:
                     # Plan again under the file lock, against the latest file.
                     result = _plan_import(data, incoming, overwrite, normalise, what)
                     for entry in result.added + result.replaced:
-                        data[entry] = incoming[entry]
+                        value = incoming[entry]
+                        data[entry] = value if encode is None else encode(entry, value)
         return result
 
     def reload(self) -> None:
@@ -444,12 +487,39 @@ def _is_key_entry(name: object) -> bool:
     return isinstance(name, str) and name.startswith(_KEY_PREFIX)
 
 
-def _key_entry(secret: bytes) -> Dict[str, str]:
-    return {"secret": base64.b64encode(secret).decode("ascii")}
+class _KeyRecord(NamedTuple):
+    """A named key: the ``current`` key and older ``retired`` keys (newest first)."""
+
+    current: bytes
+    retired: Tuple[bytes, ...]
 
 
-def _parse_key(entry: str, raw: Any) -> bytes:
-    value = raw.get("secret") if isinstance(raw, dict) else None
+def _new_key(rng: Optional[Random]) -> bytes:
+    if rng is None:
+        return secrets.token_bytes(KEY_SIZE)
+    return bytes(rng.getrandbits(8) for _ in range(KEY_SIZE))
+
+
+def _key_entry(record: _KeyRecord) -> Dict[str, Any]:
+    entry: Dict[str, Any] = {"secret": base64.b64encode(record.current).decode("ascii")}
+    if record.retired:
+        entry["retired"] = [base64.b64encode(key).decode("ascii") for key in record.retired]
+    return entry
+
+
+def _parse_key_record(entry: str, raw: Any) -> _KeyRecord:
+    if not isinstance(raw, dict):
+        raise KeyStoreError(f"{entry!r} is invalid: expected a base64 'secret' of {KEY_SIZE} bytes")
+    retired = raw.get("retired", [])
+    if not isinstance(retired, list):
+        raise KeyStoreError(f"{entry!r} is invalid: 'retired' must be a list")
+    return _KeyRecord(
+        _decode_secret(entry, raw.get("secret")),
+        tuple(_decode_secret(entry, value) for value in retired),
+    )
+
+
+def _decode_secret(entry: str, value: Any) -> bytes:
     try:
         secret = base64.b64decode(value, validate=True) if isinstance(value, str) else b""
     except (binascii.Error, ValueError):
@@ -459,11 +529,24 @@ def _parse_key(entry: str, raw: Any) -> bytes:
     return secret
 
 
-def _normalised_key(entry: str, raw: Any) -> Optional[Dict[str, Any]]:
-    try:
-        return _key_entry(_parse_key(entry, raw))
-    except KeyStoreError:
-        return None
+def parse_key_entries(keys: Mapping[str, Any], name: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    """Validate exported key entries (``{"key:<name>": {...}}``); return them normalised."""
+    if not isinstance(keys, Mapping):
+        raise KeyStoreError("expected a JSON object that maps key entries to keys")
+    if name is not None:
+        keys = {entry: raw for entry, raw in keys.items() if entry == _KEY_PREFIX + name}
+        if not keys:
+            raise KeyStoreError(f"no key named {name!r} to import")
+    incoming: Dict[str, Dict[str, Any]] = {}
+    for entry, raw in keys.items():
+        if not _is_key_entry(entry):
+            raise KeyStoreError(f"{entry!r} is not a key entry ('key:<name>')")
+        try:
+            validate_family(entry[len(_KEY_PREFIX) :])
+        except YaceError as exc:
+            raise KeyStoreError(f"invalid key name in {entry!r}: {exc}") from None
+        incoming[entry] = _key_entry(_parse_key_record(entry, raw))
+    return incoming
 
 
 def _normalised(name: str, raw: Any) -> Optional[Dict[str, Any]]:
@@ -532,6 +615,10 @@ def _write_json(path: Path, data: Mapping[str, Any]) -> None:
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
+        if not path.exists():
+            # A new store holds keys: only its owner may read it. (Existing files
+            # keep their permissions, so deliberately shared stores stay shared.)
+            restrict_to_owner(tmp)
         for attempt in itertools.count():
             try:
                 _swap_in(tmp, path)

@@ -45,6 +45,7 @@ from .errors import (
     YaceError,
 )
 from .sealed import StreamInfo
+from .keybackends import DpapiKeyStore, KeyBackend, KeyringKeyStore, open_key_backend
 from .keystore import ENV_VAR, Family, ImportResult, KeyStore, default_keystore_path
 from .tables import MAX_LENGTH, MIN_LENGTH, SUPPORTED_CHARACTERS, Table
 
@@ -64,6 +65,7 @@ __all__ = [
     "SUPPORTED_CHARACTERS",
     "AlgorithmInfo",
     "Codec",
+    "DpapiKeyStore",
     "DecodingError",
     "DecryptionError",
     "EncodingError",
@@ -72,8 +74,10 @@ __all__ = [
     "ImportResult",
     "InvalidKeyError",
     "InvalidNameError",
+    "KeyBackend",
     "KeyStore",
     "KeyStoreError",
+    "KeyringKeyStore",
     "StreamInfo",
     "Table",
     "TableNotFoundError",
@@ -92,5 +96,6 @@ __all__ = [
     "encrypt",
     "encrypt_stream",
     "generate_key",
+    "open_key_backend",
     "parse_header",
 ]

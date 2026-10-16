@@ -48,6 +48,7 @@ from typing import (
 from . import sealed
 from ._text import TokenLike, token_text
 from .errors import DecodingError, EncodingError, UnsupportedCharacterError
+from .keybackends import KeyBackend
 from .keystore import KeyStore
 from .tables import (
     CODE_ALPHABET,
@@ -127,17 +128,30 @@ class Codec:
     key store file, or ``None`` for the default key store
     (:func:`~yace_codec.keystore.default_keystore_path`).
 
+    ``key_backend`` keeps the secret keys for :meth:`encrypt` elsewhere (see
+    :mod:`yace_codec.keybackends`); by default they live in ``keystore``.
+
     ``rng`` replaces the operating system's random source for new tables and
     for the per-token randomness. Pass a seeded :class:`random.Random` only to
     get reproducible output in tests.
     """
 
-    def __init__(self, keystore: KeyStoreLike = None, *, rng: Optional[Random] = None) -> None:
+    def __init__(
+        self,
+        keystore: KeyStoreLike = None,
+        *,
+        rng: Optional[Random] = None,
+        key_backend: Optional[KeyBackend] = None,
+    ) -> None:
         self.keystore = _as_keystore(keystore)
+        #: Where secret keys for encrypt()/decrypt() live (default: the key store).
+        self.keys: KeyBackend = self.keystore if key_backend is None else key_backend
         self._rng = rng
 
     def __repr__(self) -> str:
-        return f"Codec({self.keystore!r})"
+        if self.keys is self.keystore:
+            return f"Codec({self.keystore!r})"
+        return f"Codec({self.keystore!r}, key_backend={self.keys!r})"
 
     def encode(
         self,
@@ -422,7 +436,7 @@ class Codec:
             return {"secret": secret}
         if isinstance(key, (bytes, bytearray, memoryview)):
             return {"key": sealed.check_key(key)}
-        return {"key": self.keystore.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)}
+        return {"key": self.keys.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)}
 
     def _decryption_secrets(
         self,
@@ -439,7 +453,7 @@ class Codec:
             if isinstance(keys, (str, bytes, bytearray, memoryview)):
                 raise TypeError("keys must be a list of 32-byte keys, not a single value")
             return {"keys": [sealed.check_key(k) for k in keys]}
-        return {"keys": [self.keystore.get_key(name) for name in self.keystore.key_names()]}
+        return {"keys": self.keys.decryption_keys()}
 
 
 @overload
@@ -450,6 +464,7 @@ def encrypt(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
+    key_backend: Optional[KeyBackend] = None,
     aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
     output: Literal["text"] = "text",
@@ -463,6 +478,7 @@ def encrypt(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
+    key_backend: Optional[KeyBackend] = None,
     aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
     output: Literal["bytes"],
@@ -476,6 +492,7 @@ def encrypt(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
+    key_backend: Optional[KeyBackend] = None,
     aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
     output: str,
@@ -488,6 +505,7 @@ def encrypt(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
+    key_backend: Optional[KeyBackend] = None,
     aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
     output: str = "text",
@@ -497,7 +515,10 @@ def encrypt(
     With a ``token`` (your own secret) or a raw 32-byte ``key``, the key store
     is not used at all.
     """
-    codec = Codec(KeyStore.in_memory() if _no_store_needed(key, token, password, keystore) else keystore)
+    codec = Codec(
+        KeyStore.in_memory() if _no_store_needed(key, token, password, keystore) else keystore,
+        key_backend=key_backend,
+    )
     return codec.encrypt(
         data, key, token=token, password=password, aad=aad, algorithm=algorithm, output=output
     )
@@ -512,13 +533,14 @@ def decrypt(
     aad: sealed.Aad = b"",
     max_age: Optional[float] = None,
     keystore: KeyStoreLike = None,
+    key_backend: Optional[KeyBackend] = None,
 ) -> Union[str, bytes]:
     """Decrypt; shortcut for ``Codec(keystore).decrypt(...)``.
 
     With a ``token`` or ``keys``, the key store is not used at all.
     """
     no_store = keystore is None and (token is not None or password is not None or keys is not None)
-    codec = Codec(KeyStore.in_memory() if no_store else keystore)
+    codec = Codec(KeyStore.in_memory() if no_store else keystore, key_backend=key_backend)
     return codec.decrypt(encrypted, token=token, password=password, keys=keys, aad=aad, max_age=max_age)
 
 
@@ -530,6 +552,7 @@ def encrypt_stream(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
+    key_backend: Optional[KeyBackend] = None,
     aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
     output: str = "text",
@@ -537,7 +560,10 @@ def encrypt_stream(
     chunk_size: int = sealed.DEFAULT_CHUNK_SIZE,
 ) -> int:
     """Encrypt a stream; shortcut for ``Codec(keystore).encrypt_stream(...)``."""
-    codec = Codec(KeyStore.in_memory() if _no_store_needed(key, token, password, keystore) else keystore)
+    codec = Codec(
+        KeyStore.in_memory() if _no_store_needed(key, token, password, keystore) else keystore,
+        key_backend=key_backend,
+    )
     return codec.encrypt_stream(
         src, dst, key, token=token, password=password, aad=aad, algorithm=algorithm,
         output=output, text=text, chunk_size=chunk_size,
@@ -554,10 +580,11 @@ def decrypt_stream(
     aad: sealed.Aad = b"",
     max_age: Optional[float] = None,
     keystore: KeyStoreLike = None,
+    key_backend: Optional[KeyBackend] = None,
 ) -> sealed.StreamInfo:
     """Decrypt a stream; shortcut for ``Codec(keystore).decrypt_stream(...)``."""
     no_store = keystore is None and (token is not None or password is not None or keys is not None)
-    codec = Codec(KeyStore.in_memory() if no_store else keystore)
+    codec = Codec(KeyStore.in_memory() if no_store else keystore, key_backend=key_backend)
     return codec.decrypt_stream(
         src, dst, token=token, password=password, keys=keys, aad=aad, max_age=max_age
     )
