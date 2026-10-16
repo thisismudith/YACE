@@ -186,7 +186,8 @@ def test_tables_import_deeply_nested_json(run, tmp_path):
     bad = tmp_path / "deep.json"
     bad.write_text("[" * 100_000 + "]" * 100_000)
     code, _, err = run("tables", "import", str(bad))
-    assert code == 1 and "not valid JSON" in err
+    # Python 3.14 parses deep nesting; earlier versions hit the recursion limit.
+    assert code == 1 and ("not valid JSON" in err or "expected a JSON object" in err)
 
 
 def test_powershell_utf16_files(run, tmp_path):

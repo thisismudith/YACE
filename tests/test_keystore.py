@@ -235,7 +235,8 @@ def test_ensure_tables_validates_family(store):
 def test_deeply_nested_json_is_rejected(tmp_path):
     path = tmp_path / "keystore.json"
     path.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
-    with pytest.raises(yace.KeyStoreError, match="not valid JSON"):
+    # Python 3.14 parses deep nesting; earlier versions hit the recursion limit.
+    with pytest.raises(yace.KeyStoreError, match="not valid JSON|must contain a JSON object"):
         yace.KeyStore(path).table_names()
 
 
