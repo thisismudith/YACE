@@ -272,11 +272,13 @@ def test_cli_encrypt_decrypt(run, tmp_path):
     assert run("decrypt", stdin=token)[:2] == (0, blob.read_bytes())
 
 
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 def test_cli_token(run, monkeypatch):
     monkeypatch.delenv("YACE_CODEC_PASSWORD", raising=False)
     monkeypatch.setenv("YACE_CODEC_TOKEN", "s3cret")
-    code, token, _ = run("encrypt", "--token", "--text", "via env")
-    assert code == 0
+    with pytest.warns(DeprecationWarning, match="YACE_CODEC_TOKEN"):
+        code, token, err = run("encrypt", "--token", "--text", "via env")
+    assert code == 0 and "deprecated" in err
     assert run("decrypt", "--token", stdin=token)[:2] == (0, b"via env")
     monkeypatch.delenv("YACE_CODEC_TOKEN")
     monkeypatch.setenv("YACE_CODEC_PASSWORD", "s3cret")  # 0.2.0 name

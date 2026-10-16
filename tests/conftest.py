@@ -39,3 +39,34 @@ def legacy_tables():
 @pytest.fixture(scope="session")
 def legacy_vectors():
     return json.loads((FIXTURES / "legacy_tokens.json").read_text(encoding="utf-8"))["vectors"]
+
+
+@pytest.fixture
+def memory_keyring():
+    """Replace the system keyring with an in-memory one for the test."""
+    keyring = pytest.importorskip("keyring")
+    from keyring.backend import KeyringBackend
+    from keyring.errors import PasswordDeleteError
+
+    class MemoryKeyring(KeyringBackend):
+        priority = 1
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.data = {}
+
+        def get_password(self, service, username):
+            return self.data.get((service, username))
+
+        def set_password(self, service, username, password):
+            self.data[(service, username)] = password
+
+        def delete_password(self, service, username):
+            if self.data.pop((service, username), None) is None:
+                raise PasswordDeleteError(username)
+
+    previous = keyring.get_keyring()
+    backend = MemoryKeyring()
+    keyring.set_keyring(backend)
+    yield backend
+    keyring.set_keyring(previous)

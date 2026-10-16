@@ -6,19 +6,24 @@ import argparse
 import contextlib
 import errno
 import getpass
+import io
 import json
 import os
 import sys
+import tempfile
+import warnings
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, BinaryIO, Callable, Dict, Iterator, List, Optional, Sequence, Union, cast
 
 from . import __version__
+from ._algorithms import DEFAULT_ALGORITHM, algorithms
 from .codec import DEFAULT_FAMILY, DEFAULT_ITERATIONS, DEFAULT_LENGTH, Codec
 from .errors import EncodingError, KeyStoreError, UnsupportedCharacterError, YaceError
+from .keybackends import BACKENDS, KeyBackend, open_key_backend
 from .keystore import ENV_VAR, KeyStore, family_of
 
 PROG = "yace-codec"
-#: Environment variables that supply the secret token for --token (for scripts).
+#: Deprecated environment variables that supply the secret token for --token.
 #: The first one that is set wins; YACE_CODEC_PASSWORD is the 0.2.0 name.
 TOKEN_ENV_VAR = "YACE_CODEC_TOKEN"
 PASSWORD_ENV_VAR = "YACE_CODEC_PASSWORD"
@@ -102,48 +107,95 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     dec.set_defaults(handler=_cmd_decode)
 
+    backend = argparse.ArgumentParser(add_help=False)
+    backend.add_argument(
+        "--key-backend", choices=BACKENDS, default="json",
+        help="where secret keys live: json (the key store file, default), dpapi "
+        "(Windows, keys encrypted for your account), or keyring (system keyring)",
+    )
+
+    def add_secret_options(command: argparse.ArgumentParser, encrypting: bool) -> None:
+        secret = command.add_mutually_exclusive_group()
+        if encrypting:
+            secret.add_argument(
+                "--key", metavar="NAME",
+                help="stored secret key to use (default: default; created on first use)",
+            )
+        secret.add_argument(
+            "-p", "--token", "--password", dest="token", action="store_true",
+            help="use your own secret token instead of a stored key (asked for, hidden)",
+        )
+        secret.add_argument(
+            "--token-file", metavar="PATH",
+            help="read your secret token from this file (one trailing newline is ignored)",
+        )
+        secret.add_argument(
+            "--token-stdin", action="store_true",
+            help="read your secret token from the first line of standard input",
+        )
+        command.add_argument(
+            "--aad", metavar="TEXT",
+            help="associated data: context (such as a record id) that must match to decrypt",
+        )
+
     encr = commands.add_parser(
-        "encrypt", parents=[store], help="encrypt text or a file into letters and digits"
+        "encrypt", parents=[store, backend], help="encrypt text or a file (any size)"
     )
     encr.add_argument("input", nargs="?", default="-", help="file to encrypt (default: stdin)")
     encr.add_argument("-t", "--text", help="encrypt this string instead of INPUT")
     encr.add_argument("-o", "--output", metavar="PATH", help="write the result here (default: stdout)")
-    secret = encr.add_mutually_exclusive_group()
-    secret.add_argument(
-        "--key", metavar="NAME",
-        help="secret key in the key store (default: default; created on first use)",
+    add_secret_options(encr, encrypting=True)
+    encr.add_argument(
+        "-a", "--algorithm", choices=[info.name for info in algorithms()], default=DEFAULT_ALGORITHM,
+        help="encryption algorithm (default: %(default)s; see 'yace-codec algorithms')",
     )
-    secret.add_argument(
-        "-p", "--token", "--password", dest="token", action="store_true",
-        help=f"use your own secret token instead of a stored key (asked for, or ${TOKEN_ENV_VAR})",
+    encr.add_argument(
+        "-f", "--format", choices=("text", "bytes"), default="text",
+        help="text: letters and digits (default); bytes: raw binary, about 27%% smaller",
     )
     encr.set_defaults(handler=_cmd_encrypt)
 
-    decr = commands.add_parser("decrypt", parents=[store], help="decrypt the output of encrypt")
+    decr = commands.add_parser(
+        "decrypt", parents=[store, backend], help="decrypt the output of encrypt (any format)"
+    )
     decr.add_argument("input", nargs="?", default="-", help="file to decrypt (default: stdin)")
     decr.add_argument("-t", "--text", help="decrypt this string instead of INPUT")
     decr.add_argument("-o", "--output", metavar="PATH", help="write the result here (default: stdout)")
-    decr.add_argument(
-        "-p", "--token", "--password", dest="token", action="store_true",
-        help=f"it was encrypted with your own secret token (asked for, or ${TOKEN_ENV_VAR})",
-    )
+    add_secret_options(decr, encrypting=False)
     decr.add_argument(
         "--max-age", type=float, metavar="SECONDS", help="reject data encrypted longer ago than this"
     )
     decr.set_defaults(handler=_cmd_decrypt)
 
-    keys = commands.add_parser("keys", help="inspect and share secret keys for encrypt/decrypt")
+    algs = commands.add_parser("algorithms", help="list the encryption algorithms")
+    algs.set_defaults(handler=_cmd_algorithms)
+
+    keys = commands.add_parser("keys", help="manage and share secret keys for encrypt/decrypt")
     key_actions = keys.add_subparsers(title="actions", metavar="ACTION")
     key_actions.required = True
-    key_list = key_actions.add_parser("list", parents=[store], help="list secret key names")
+    key_list = key_actions.add_parser("list", parents=[store, backend], help="list secret key names")
     key_list.set_defaults(handler=_cmd_keys_list)
+    key_rotate = key_actions.add_parser(
+        "rotate", parents=[store, backend],
+        help="give a key a new value; the old one still decrypts older data",
+    )
+    key_rotate.add_argument("name", help="key name")
+    key_rotate.set_defaults(handler=_cmd_keys_rotate)
+    key_delete = key_actions.add_parser(
+        "delete", parents=[store, backend], help="delete a key (data encrypted with it is lost)"
+    )
+    key_delete.add_argument("name", help="key name")
+    key_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
+    key_delete.set_defaults(handler=_cmd_keys_delete)
     key_export = key_actions.add_parser(
-        "export", parents=[store], help="export a secret key as JSON (keep the file private)"
+        "export", parents=[store, backend], help="export a secret key as JSON (keep the file private)"
     )
     key_export.add_argument("name", help="key name")
     key_export.add_argument("-o", "--output", metavar="PATH", help="write here (default: stdout)")
     key_export.set_defaults(handler=_cmd_keys_export)
-    key_import = key_actions.add_parser("import", parents=[store], help="import secret keys from JSON")
+    key_import = key_actions.add_parser(
+        "import", parents=[store, backend], help="import secret keys from JSON"
+    )
     key_import.add_argument("file", help="JSON file from 'keys export' ('-' for stdin)")
     which_key = key_import.add_mutually_exclusive_group()
     which_key.add_argument("--name", metavar="NAME", help="import only this key")
@@ -300,34 +352,130 @@ def _cmd_import(args: argparse.Namespace) -> int:
 
 
 def _cmd_encrypt(args: argparse.Namespace) -> int:
-    raw = _read_input(args)
-    data: Union[str, bytes] = raw
+    is_text = False
     if args.text is not None:
+        raw = _read_input(args)
         with contextlib.suppress(UnicodeDecodeError):
-            data = raw.decode("utf-8")  # so Python's decrypt() returns str
-    if args.token:
-        result = Codec(KeyStore.in_memory()).encrypt(data, token=_secret_token(confirm=True))
-    else:
-        result = Codec(_keystore(args)).encrypt(data, args.key)
-    _write_output(args.output, f"{result}\n".encode("ascii"))
+            raw.decode("utf-8")
+            is_text = True  # so Python's decrypt() returns str
+    secret = _secret_token(args, confirm=True)
+    codec = Codec(KeyStore.in_memory()) if secret is not None else _key_codec(args)
+    with _input_stream(args) as src, _output_stream(args.output) as dst:
+        codec.encrypt_stream(
+            src, dst, None if secret is not None else args.key, token=secret,
+            aad=_aad(args), algorithm=args.algorithm, output=args.format, text=is_text,
+        )
+        if args.format == "text":
+            dst.write(b"\n")
     return 0
 
 
 def _cmd_decrypt(args: argparse.Namespace) -> int:
-    raw = _read_input(args)
-    if args.token:
-        codec = Codec(KeyStore.in_memory())
-        result = codec.decrypt(raw, token=_secret_token(), max_age=args.max_age)
-    else:
-        result = Codec(_keystore(args)).decrypt(raw, max_age=args.max_age)
-    _write_output(args.output, result.encode("utf-8") if isinstance(result, str) else result)
+    secret = _secret_token(args)
+    codec = Codec(KeyStore.in_memory()) if secret is not None else _key_codec(args)
+    with _input_stream(args) as src, _output_stream(args.output) as dst:
+        codec.decrypt_stream(src, dst, token=secret, aad=_aad(args), max_age=args.max_age)
     return 0
 
 
-def _secret_token(*, confirm: bool = False) -> str:
+def _cmd_algorithms(args: argparse.Namespace) -> int:
+    infos = algorithms()
+    width = max(len(info.name) for info in infos)
+    for info in infos:
+        marks = ["default"] if info.default else []
+        if not info.available:
+            marks.append("not installed")
+        suffix = f" [{', '.join(marks)}]" if marks else ""
+        _echo(f"{info.name:<{width}}  {info.description}{suffix}")
+    return 0
+
+
+def _aad(args: argparse.Namespace) -> bytes:
+    return b"" if args.aad is None else os.fsencode(args.aad)
+
+
+def _key_codec(args: argparse.Namespace) -> Codec:
+    return Codec(KeyStore.in_memory(), key_backend=_key_backend(args))
+
+
+def _key_backend(args: argparse.Namespace) -> KeyBackend:
+    if args.key_backend == "json":
+        return _keystore(args)
+    return open_key_backend(args.key_backend, path=args.keystore)
+
+
+def _describe_backend(args: argparse.Namespace, backend: KeyBackend) -> str:
+    path = getattr(backend, "path", None)
+    return str(args.keystore or path or backend)
+
+
+@contextlib.contextmanager
+def _input_stream(args: argparse.Namespace) -> Iterator[BinaryIO]:
+    if args.text is not None:
+        yield io.BytesIO(_read_input(args))
+    elif args.input == "-":
+        yield sys.stdin.buffer
+    else:
+        if os.path.isdir(args.input):
+            raise IsADirectoryError(errno.EISDIR, "is a directory", args.input)
+        with open(args.input, "rb") as fh:
+            yield fh
+
+
+@contextlib.contextmanager
+def _output_stream(target: Optional[str]) -> Iterator[BinaryIO]:
+    """Standard output, or a file that only replaces ``target`` once everything succeeded."""
+    if target is None or target == "-":
+        yield cast(BinaryIO, _StdoutWriter())
+        return
+    if os.path.isdir(target):
+        raise IsADirectoryError(errno.EISDIR, "is a directory", target)
+    directory, name = os.path.split(os.path.abspath(target))
+    fd, tmp = tempfile.mkstemp(prefix=f".{name}.", suffix=".part", dir=directory)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            yield fh
+        if sys.platform != "win32":
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(tmp, 0o666 & ~umask)  # like a normally created file
+        os.replace(tmp, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+class _StdoutWriter(io.RawIOBase):
+    """Binary standard output that reports a closed pipe as BrokenPipeError."""
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, data: Any) -> int:
+        _write_stdout(bytes(data))
+        return len(data)
+
+
+def _secret_token(args: argparse.Namespace, *, confirm: bool = False) -> Optional[Union[str, bytes]]:
+    """The secret token chosen on the command line, or ``None`` to use a stored key."""
+    if args.token_file is not None:
+        return _strip_newline(_read_file(args.token_file), args.token_file)
+    if args.token_stdin:
+        if args.text is None and args.input == "-":
+            raise EncodingError("with --token-stdin, give INPUT as a file or use --text")
+        return _strip_newline(sys.stdin.buffer.readline(), "standard input")
+    if not args.token:
+        return None
     for name in (TOKEN_ENV_VAR, PASSWORD_ENV_VAR):
         from_env = os.environ.get(name)
         if from_env:
+            message = (
+                f"${name} is deprecated and will be removed: other programs running as you "
+                "can read environment variables. Use the prompt, --token-file, or --token-stdin."
+            )
+            warnings.warn(message, DeprecationWarning, stacklevel=2)
+            _echo(f"{PROG}: warning: {message}", err=True)
             return from_env
     secret = getpass.getpass("Secret token: ")
     if not secret:
@@ -337,18 +485,56 @@ def _secret_token(*, confirm: bool = False) -> str:
     return secret
 
 
+def _strip_newline(data: bytes, source: str) -> Union[str, bytes]:
+    if data.startswith(b"\xef\xbb\xbf"):
+        data = data[3:]
+    for ending in (b"\r\n", b"\n"):
+        if data.endswith(ending):
+            data = data[: -len(ending)]
+            break
+    if not data:
+        raise EncodingError(f"the secret token in {source} is empty")
+    try:
+        return data.decode("utf-8")  # the same bytes the prompt would give
+    except UnicodeDecodeError:
+        return data
+
+
 def _cmd_keys_list(args: argparse.Namespace) -> int:
-    store = _keystore(args)
-    names = store.key_names()
+    backend = _key_backend(args)
+    names = backend.key_names()
     if not names:
-        _echo(f"no keys in {store.path}", err=True)
+        _echo(f"no keys in {_describe_backend(args, backend)}", err=True)
     for name in names:
         _echo(name)
     return 0
 
 
+def _cmd_keys_rotate(args: argparse.Namespace) -> int:
+    backend = _key_backend(args)
+    backend.rotate_key(args.name)
+    _echo(
+        f"rotated key {args.name!r}: new data uses the new key; data encrypted before still "
+        f"decrypts ({_describe_backend(args, backend)})",
+        err=True,
+    )
+    return 0
+
+
+def _cmd_keys_delete(args: argparse.Namespace) -> int:
+    if not args.yes:
+        raise KeyStoreError(
+            f"deleting key {args.name!r} makes everything encrypted with it unreadable; "
+            "re-run with --yes to confirm"
+        )
+    backend = _key_backend(args)
+    backend.delete_key(args.name)
+    _echo(f"deleted key {args.name!r} ({_describe_backend(args, backend)})", err=True)
+    return 0
+
+
 def _cmd_keys_export(args: argparse.Namespace) -> int:
-    payload = json.dumps(_keystore(args).export_key(args.name), indent=2) + "\n"
+    payload = json.dumps(_key_backend(args).export_key(args.name), indent=2) + "\n"
     _write_output(args.output, payload.encode("ascii"), private=True)
     return 0
 
@@ -367,14 +553,14 @@ def _cmd_keys_import(args: argparse.Namespace) -> int:
             f"{args.file} holds keys: {', '.join(names) or 'none'}. Name the key you expect "
             "with --name NAME, or import everything with --all-keys"
         )
-    store = _keystore(args)
-    result = store.import_keys(keys, overwrite=args.overwrite, name=args.name)
+    backend = _key_backend(args)
+    result = backend.import_keys(keys, overwrite=args.overwrite, name=args.name)
     for label, entries in (("added", result.added), ("replaced", result.replaced)):
         for entry in entries:
             _echo(f"{label}: {entry[4:]}", err=True)
     _echo(
         f"{len(result.added)} added, {len(result.unchanged)} unchanged, "
-        f"{len(result.replaced)} replaced ({args.keystore or store.path})",
+        f"{len(result.replaced)} replaced ({_describe_backend(args, backend)})",
         err=True,
     )
     return 0

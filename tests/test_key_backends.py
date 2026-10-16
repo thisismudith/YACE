@@ -12,38 +12,9 @@ import pytest
 import yace_codec as yace
 from yace_codec import keybackends
 
-keyring = pytest.importorskip("keyring")
-from keyring.backend import KeyringBackend  # noqa: E402
-from keyring.errors import PasswordDeleteError  # noqa: E402
+pytest.importorskip("keyring")
 
 WINDOWS = sys.platform == "win32"
-
-
-class MemoryKeyring(KeyringBackend):
-    priority = 1  # type: ignore[assignment]
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.data = {}
-
-    def get_password(self, service, username):
-        return self.data.get((service, username))
-
-    def set_password(self, service, username, password):
-        self.data[(service, username)] = password
-
-    def delete_password(self, service, username):
-        if self.data.pop((service, username), None) is None:
-            raise PasswordDeleteError(username)
-
-
-@pytest.fixture
-def memory_keyring():
-    previous = keyring.get_keyring()
-    backend = MemoryKeyring()
-    keyring.set_keyring(backend)
-    yield backend
-    keyring.set_keyring(previous)
 
 
 def json_backend(tmp_path):
