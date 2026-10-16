@@ -242,6 +242,7 @@ class Codec:
         *,
         token: Optional[sealed.Secret] = None,
         password: Optional[sealed.Secret] = None,
+        aad: sealed.Aad = b"",
         algorithm: Optional[str] = None,
     ) -> str:
         """Encrypt ``data`` (any text or bytes) into a token of letters and digits.
@@ -253,7 +254,8 @@ class Codec:
         ``password`` is another name for ``token``. The result does not reveal
         the key name, the exact length, or anything else about the data.
 
-        ``algorithm`` is one of :func:`~yace_codec.algorithms` (default
+        ``aad`` (associated data, bytes or text) is authenticated but not
+        stored; :meth:`decrypt` needs the same value. ``algorithm`` is one of :func:`~yace_codec.algorithms` (default
         :data:`~yace_codec.DEFAULT_ALGORITHM`, ``"aes-256-gcm"``).
         """
         secret = _choose_secret(token, password)
@@ -269,9 +271,9 @@ class Codec:
         else:
             raise TypeError(f"data must be str or bytes-like, not {type(data).__name__}")
         if secret is not None:
-            return sealed.seal(raw, text=is_text, secret=secret, algorithm=algorithm)
+            return sealed.seal(raw, text=is_text, secret=secret, aad=aad, algorithm=algorithm)
         secret = self.keystore.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)
-        return sealed.seal(raw, text=is_text, key=secret, algorithm=algorithm)
+        return sealed.seal(raw, text=is_text, key=secret, aad=aad, algorithm=algorithm)
 
     def decrypt(
         self,
@@ -279,12 +281,13 @@ class Codec:
         *,
         token: Optional[sealed.Secret] = None,
         password: Optional[sealed.Secret] = None,
+        aad: sealed.Aad = b"",
         max_age: Optional[float] = None,
     ) -> Union[str, bytes]:
         """Decrypt the output of :meth:`encrypt`.
 
         Returns ``str`` for text and ``bytes`` for bytes, as they were encrypted.
-        Pass the same ``token`` (your secret) that encrypted it. Without a
+        Pass the same ``token`` (your secret) and ``aad`` that encrypted it. Without a
         ``token``, every key in the key store is tried. With
         ``max_age`` (seconds), older tokens raise
         :class:`~yace_codec.errors.TokenExpiredError`. A wrong key or token, or
@@ -293,10 +296,10 @@ class Codec:
         """
         secret = _choose_secret(token, password)
         if secret is not None:
-            data, is_text = sealed.unseal(encrypted, secret=secret, max_age=max_age)
+            data, is_text = sealed.unseal(encrypted, secret=secret, aad=aad, max_age=max_age)
         else:
             keys = [self.keystore.get_key(name) for name in self.keystore.key_names()]
-            data, is_text = sealed.unseal(encrypted, keys=keys, max_age=max_age)
+            data, is_text = sealed.unseal(encrypted, keys=keys, aad=aad, max_age=max_age)
         return data.decode("utf-8") if is_text else data
 
 
@@ -307,6 +310,7 @@ def encrypt(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
+    aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
 ) -> str:
     """Encrypt ``data``; shortcut for ``Codec(keystore).encrypt(...)``.
@@ -315,9 +319,11 @@ def encrypt(
     """
     if (token is not None or password is not None) and keystore is None and key is None:
         return Codec(KeyStore.in_memory()).encrypt(
-            data, token=token, password=password, algorithm=algorithm
+            data, token=token, password=password, aad=aad, algorithm=algorithm
         )
-    return Codec(keystore).encrypt(data, key, token=token, password=password, algorithm=algorithm)
+    return Codec(keystore).encrypt(
+        data, key, token=token, password=password, aad=aad, algorithm=algorithm
+    )
 
 
 def decrypt(
@@ -325,12 +331,13 @@ def decrypt(
     *,
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
+    aad: sealed.Aad = b"",
     max_age: Optional[float] = None,
     keystore: KeyStoreLike = None,
 ) -> Union[str, bytes]:
     """Decrypt; shortcut for ``Codec(keystore).decrypt(...)``."""
     codec = Codec(KeyStore.in_memory() if (token is not None or password is not None) and keystore is None else keystore)
-    return codec.decrypt(encrypted, token=token, password=password, max_age=max_age)
+    return codec.decrypt(encrypted, token=token, password=password, aad=aad, max_age=max_age)
 
 
 def _choose_secret(

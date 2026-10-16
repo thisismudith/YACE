@@ -66,6 +66,8 @@ _SCRYPT_MAXMEM = 256 * 1024 * 1024
 
 #: A secret chosen by the user: any non-empty text or bytes.
 Secret = Union[str, bytes, bytearray, memoryview]
+#: Associated data: bytes, or text (encoded as UTF-8).
+Aad = Union[str, bytes, bytearray, memoryview]
 
 _FRAME = struct.Struct("!BQQ")  # kind, creation time (Unix seconds), data length
 _KIND_BYTES = 0
@@ -90,23 +92,28 @@ def seal(
     text: bool,
     key: Optional[bytes] = None,
     secret: Optional[Secret] = None,
+    aad: Aad = b"",
     algorithm: Optional[str] = None,
     now: Optional[float] = None,
     salt: Optional[bytes] = None,
 ) -> str:
     """Encrypt ``data`` with a 32-byte ``key`` or your own ``secret``; return a token.
 
+    ``aad`` (associated data) is authenticated but not stored: decryption needs
+    the same ``aad``, so a token moved to another context (another record, user,
+    or file) does not decrypt there.
     ``algorithm`` defaults to :data:`DEFAULT_ALGORITHM`. ``salt`` and ``now``
     fix the random salt and the creation time, for test vectors only.
     """
     alg = _algorithms.by_name(algorithm)
+    aad_block = _aad_block(aad)
     salt = secrets.token_bytes(SALT_SIZE) if salt is None else _check_salt(salt)
     prk = _extract(salt, _secret(salt, key=key, secret=secret))
     created = int(time.time() if now is None else now)
     frame = _FRAME.pack(_KIND_TEXT if text else _KIND_BYTES, created, len(data)) + bytes(data)
     frame += bytes(padme(len(frame)) - len(frame))
     header = salt + bytes([VERSION_MESSAGE, alg.id])
-    body = alg.cipher(prk, VERSION_MESSAGE, header + _aad_block(b"")).seal(b"", frame)
+    body = alg.cipher(prk, VERSION_MESSAGE, header + aad_block).seal(b"", frame)
     mask = _mask(prk)
     raw = salt + bytes([VERSION_MESSAGE ^ mask[0], alg.id ^ mask[1]]) + body
     return yace62_encode(raw)
@@ -117,14 +124,17 @@ def unseal(
     *,
     keys: Iterable[bytes] = (),
     secret: Optional[Secret] = None,
+    aad: Aad = b"",
     max_age: Optional[float] = None,
     now: Optional[float] = None,
 ) -> Tuple[bytes, bool]:
     """Decrypt a token; return ``(data, is_text)``.
 
     With ``secret``, only that secret is tried. Otherwise every key in
-    ``keys`` is tried, so tokens never need to name their key.
+    ``keys`` is tried, so tokens never need to name their key. ``aad`` must
+    be the associated data given to :func:`seal`.
     """
+    aad_block = _aad_block(aad)
     prefix, raw = _token_bytes(token)
     salt = raw[:SALT_SIZE]
     candidates = [_secret(salt, secret=secret)] if secret is not None else [_check_key(k) for k in keys]
@@ -133,8 +143,8 @@ def unseal(
     unavailable: List[DecryptionError] = []
     for candidate in candidates:
         prk = _extract(salt, candidate)
-        frame = None if prefix else _open_message(prk, raw, unavailable)
-        if frame is None:
+        frame = None if prefix else _open_message(prk, raw, aad_block, unavailable)
+        if frame is None and len(aad_block) == 8:  # older tokens have no associated data
             frame = _open_legacy(prk, prefix, raw)
         if frame is not None:
             break
@@ -222,7 +232,9 @@ def _token_bytes(token: TokenLike) -> Tuple[str, bytes]:
     return prefix, raw
 
 
-def _open_message(prk: bytes, raw: bytes, unavailable: List[DecryptionError]) -> Optional[bytes]:
+def _open_message(
+    prk: bytes, raw: bytes, aad_block: bytes, unavailable: List[DecryptionError]
+) -> Optional[bytes]:
     mask = _mask(prk)
     if raw[SALT_SIZE] ^ mask[0] != VERSION_MESSAGE:
         return None
@@ -233,7 +245,7 @@ def _open_message(prk: bytes, raw: bytes, unavailable: List[DecryptionError]) ->
         unavailable.append(_algorithms.unavailable_error(alg))
         return None
     header = raw[:SALT_SIZE] + bytes([VERSION_MESSAGE, alg.id])
-    frame = alg.cipher(prk, VERSION_MESSAGE, header + _aad_block(b"")).open(b"", raw[SALT_SIZE + 2 :])
+    frame = alg.cipher(prk, VERSION_MESSAGE, header + aad_block).open(b"", raw[SALT_SIZE + 2 :])
     if frame is None or len(frame) < _FRAME.size:
         return None
     return frame
@@ -258,9 +270,15 @@ def _check_age(created: int, max_age: Optional[float], now: Optional[float]) -> 
             raise TokenExpiredError(f"the token is {int(age)} seconds old (limit {max_age})")
 
 
-def _aad_block(aad: bytes) -> bytes:
+def _aad_block(aad: Aad) -> bytes:
     """Length-prefixed associated data, so its boundary is unambiguous."""
-    return len(aad).to_bytes(8, "big") + aad
+    if isinstance(aad, str):
+        data = aad.encode("utf-8", "surrogatepass")
+    elif isinstance(aad, (bytes, bytearray, memoryview)):
+        data = bytes(aad)
+    else:
+        raise TypeError(f"aad must be bytes or str, not {type(aad).__name__}")
+    return len(data).to_bytes(8, "big") + data
 
 
 def _extract(salt: bytes, secret: bytes) -> bytes:
