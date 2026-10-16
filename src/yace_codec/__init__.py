@@ -11,6 +11,7 @@ encode()/decode() only obfuscate text. For secrets, use encrypt()/decrypt(),
 which encrypt with your own secret token or a stored key.
 """
 
+from ._algorithms import DEFAULT_ALGORITHM, AlgorithmInfo, algorithms
 from .codec import (
     DEFAULT_FAMILY,
     DEFAULT_ITERATIONS,
@@ -45,6 +46,7 @@ from .tables import MAX_LENGTH, MIN_LENGTH, SUPPORTED_CHARACTERS, Table
 __version__ = "0.2.1"
 
 __all__ = [
+    "DEFAULT_ALGORITHM",
     "DEFAULT_FAMILY",
     "DEFAULT_ITERATIONS",
     "DEFAULT_KEY",
@@ -55,6 +57,7 @@ __all__ = [
     "MAX_LENGTH",
     "MIN_LENGTH",
     "SUPPORTED_CHARACTERS",
+    "AlgorithmInfo",
     "Codec",
     "DecodingError",
     "DecryptionError",
@@ -71,6 +74,7 @@ __all__ = [
     "UnsupportedCharacterError",
     "YaceError",
     "__version__",
+    "algorithms",
     "decode",
     "decode_bytes",
     "decrypt",

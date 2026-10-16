@@ -1,28 +1,28 @@
 """Encrypted YACE tokens.
 
-An encrypted token is only letters and digits. It reveals nothing about its
-contents except roughly how long they are: no family name, code length, key
-name, creation time, or exact length. Tokens from version 0.2.0 start with
-``yace2_``; they still decrypt.
+An encrypted token is only letters and digits (or raw bytes). It reveals
+nothing about its contents except roughly how long they are: no family name,
+key name, algorithm, creation time, or exact length.
 
-How a token is made:
+Format version 3 (a single message)::
+
+    salt (16) || masked(version 0x03 || algorithm id) || ciphertext || tag
 
 1. A random 16-byte salt is drawn for every token.
-2. A secret is chosen: a 32-byte key from the key store, or your own secret
-   (any text or bytes) stretched with scrypt (N=2**17, r=8, p=1) and the salt.
-3. HKDF-SHA256 (RFC 5869) turns the secret and the salt into two independent
-   keys: one to encrypt, one to authenticate. Every token gets its own pair.
+2. The secret is a 32-byte key, or your own secret token (any text or bytes)
+   stretched with scrypt (N=2**17, r=8, p=1) and the salt.
+3. ``PRK = HMAC-SHA256(salt, secret)`` (HKDF-Extract). HKDF-Expand derives the
+   algorithm's keys, with the version and algorithm id in the ``info``, and a
+   3-byte mask for the header. The mask hides the version and algorithm, so
+   tokens have no recognisable prefix.
 4. A frame holds the data type (text or bytes), the creation time, the data
-   length, the data, and zero padding to a Padmé length, which hides the exact
-   size.
-5. The frame is XORed with a keystream of HMAC-SHA256 blocks (counter mode).
-6. An HMAC-SHA256 tag covers the salt and the ciphertext
-   (encrypt-then-MAC), so a wrong key or any change to the token is detected
-   before anything is decrypted.
-7. ``salt + ciphertext + tag`` is written in YACE62: 8-byte blocks as 11 letters
-   and digits.
+   length, the data, and zero padding to a Padmé length.
+5. The algorithm (see :mod:`yace_codec._algorithms`) encrypts the frame. Its
+   tag covers ``salt || version || algorithm id`` (unmasked), the length-
+   prefixed associated data, and the ciphertext.
+6. Text output is YACE62: 8-byte blocks as 11 letters and digits.
 
-Everything uses Python's standard library (``hashlib``, ``hmac``, ``secrets``).
+Tokens from versions 0.2.0 (``yace2_`` prefix) and 0.2.1 still decrypt.
 """
 
 from __future__ import annotations
@@ -33,12 +33,15 @@ import secrets
 import string
 import struct
 import time
-from typing import Iterable, Optional, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
+from . import _algorithms
+from ._algorithms import DEFAULT_ALGORITHM, hkdf_expand
 from ._text import TokenLike, token_text
 from .errors import DecodingError, DecryptionError, EncodingError, TokenExpiredError
 
 __all__ = [
+    "DEFAULT_ALGORITHM",
     "KEY_SIZE",
     "looks_encrypted",
     "padme",
@@ -50,11 +53,12 @@ __all__ = [
 
 #: Tokens made by version 0.2.0 start with this.
 LEGACY_PREFIX = "yace2_"
-#: Size in bytes of the keys stored in a key store.
+#: Size in bytes of secret keys.
 KEY_SIZE = 32
+#: Format version of single-message tokens.
+VERSION_MESSAGE = 3
 
 SALT_SIZE = 16
-TAG_SIZE = 32
 SCRYPT_N = 2**17
 SCRYPT_R = 8
 SCRYPT_P = 1
@@ -66,16 +70,18 @@ Secret = Union[str, bytes, bytearray, memoryview]
 _FRAME = struct.Struct("!BQQ")  # kind, creation time (Unix seconds), data length
 _KIND_BYTES = 0
 _KIND_TEXT = 1
-_INFO_ENCRYPT = b"yace2 encryption"
-_INFO_AUTHENTICATE = b"yace2 authentication"
+_MASK_INFO = b"yace3 header mask"
+_LEGACY_INFO_ENCRYPT = b"yace2 encryption"
+_LEGACY_INFO_AUTHENTICATE = b"yace2 authentication"
+_LEGACY_TAG_SIZE = 32
 
 _ALPHABET = string.digits + string.ascii_uppercase + string.ascii_lowercase
 _DIGIT = {ch: i for i, ch in enumerate(_ALPHABET)}
 # Characters needed for a final block of 1-8 bytes (62**chars >= 256**bytes).
 _CHARS_FOR = {1: 2, 2: 3, 3: 5, 4: 6, 5: 7, 6: 9, 7: 10, 8: 11}
 _BYTES_FOR = {chars: size for size, chars in _CHARS_FOR.items()}
-# Salt, the smallest padded frame (no data), and the tag.
-_MIN_BYTES = SALT_SIZE + 18 + TAG_SIZE
+# The smallest token: salt, header, the smallest padded frame, and a 16-byte tag.
+_MIN_BYTES = SALT_SIZE + 2 + 18 + 16
 
 
 def seal(
@@ -84,17 +90,26 @@ def seal(
     text: bool,
     key: Optional[bytes] = None,
     secret: Optional[Secret] = None,
+    algorithm: Optional[str] = None,
     now: Optional[float] = None,
+    salt: Optional[bytes] = None,
 ) -> str:
-    """Encrypt ``data`` with a stored ``key`` or your own ``secret``; return a token."""
-    salt = secrets.token_bytes(SALT_SIZE)
-    encrypt_key, mac_key = _subkeys(_secret(salt, key=key, secret=secret), salt)
+    """Encrypt ``data`` with a 32-byte ``key`` or your own ``secret``; return a token.
+
+    ``algorithm`` defaults to :data:`DEFAULT_ALGORITHM`. ``salt`` and ``now``
+    fix the random salt and the creation time, for test vectors only.
+    """
+    alg = _algorithms.by_name(algorithm)
+    salt = secrets.token_bytes(SALT_SIZE) if salt is None else _check_salt(salt)
+    prk = _extract(salt, _secret(salt, key=key, secret=secret))
     created = int(time.time() if now is None else now)
     frame = _FRAME.pack(_KIND_TEXT if text else _KIND_BYTES, created, len(data)) + bytes(data)
     frame += bytes(padme(len(frame)) - len(frame))
-    ciphertext = _xor_keystream(encrypt_key, frame)
-    tag = _tag(mac_key, "", salt, ciphertext)
-    return yace62_encode(salt + ciphertext + tag)
+    header = salt + bytes([VERSION_MESSAGE, alg.id])
+    body = alg.cipher(prk, VERSION_MESSAGE, header + _aad_block(b"")).seal(b"", frame)
+    mask = _mask(prk)
+    raw = salt + bytes([VERSION_MESSAGE ^ mask[0], alg.id ^ mask[1]]) + body
+    return yace62_encode(raw)
 
 
 def unseal(
@@ -110,27 +125,29 @@ def unseal(
     With ``secret``, only that secret is tried. Otherwise every key in
     ``keys`` is tried, so tokens never need to name their key.
     """
-    prefix, raw = _split(token)
-    salt, ciphertext, tag = raw[:SALT_SIZE], raw[SALT_SIZE:-TAG_SIZE], raw[-TAG_SIZE:]
-    to_try = [_secret(salt, secret=secret)] if secret is not None else list(keys)
-    for candidate in to_try:
-        encrypt_key, mac_key = _subkeys(candidate, salt)
-        if hmac.compare_digest(tag, _tag(mac_key, prefix, salt, ciphertext)):
-            frame = _xor_keystream(encrypt_key, ciphertext)
+    prefix, raw = _token_bytes(token)
+    salt = raw[:SALT_SIZE]
+    candidates = [_secret(salt, secret=secret)] if secret is not None else [_check_key(k) for k in keys]
+    if not candidates:
+        raise DecryptionError("no keys to try; pass the secret token if one was used")
+    unavailable: List[DecryptionError] = []
+    for candidate in candidates:
+        prk = _extract(salt, candidate)
+        frame = None if prefix else _open_message(prk, raw, unavailable)
+        if frame is None:
+            frame = _open_legacy(prk, prefix, raw)
+        if frame is not None:
             break
     else:
-        if secret is None and not to_try:
-            raise DecryptionError("the key store holds no keys; pass the secret token if one was used")
+        if unavailable:
+            raise unavailable[0]
         raise DecryptionError(
-            "this cannot be opened: wrong secret token or key store, or the data was changed"
+            "this cannot be opened: wrong secret token or key, or the data was changed"
         )
     kind, created, length = _FRAME.unpack_from(frame)
     if kind not in (_KIND_BYTES, _KIND_TEXT) or _FRAME.size + length > len(frame):
         raise DecryptionError("the token's contents are malformed")
-    if max_age is not None:
-        age = (time.time() if now is None else now) - created
-        if age > max_age:
-            raise TokenExpiredError(f"the token is {int(age)} seconds old (limit {max_age})")
+    _check_age(created, max_age, now)
     return frame[_FRAME.size : _FRAME.size + length], kind == _KIND_TEXT
 
 
@@ -191,7 +208,7 @@ def looks_encrypted(text: str) -> bool:
     )
 
 
-def _split(token: TokenLike) -> Tuple[str, bytes]:
+def _token_bytes(token: TokenLike) -> Tuple[str, bytes]:
     body = "".join(token_text(token).split())  # wrapped lines and CRLF are fine
     if not body:
         raise DecodingError("the token is empty")
@@ -205,13 +222,75 @@ def _split(token: TokenLike) -> Tuple[str, bytes]:
     return prefix, raw
 
 
+def _open_message(prk: bytes, raw: bytes, unavailable: List[DecryptionError]) -> Optional[bytes]:
+    mask = _mask(prk)
+    if raw[SALT_SIZE] ^ mask[0] != VERSION_MESSAGE:
+        return None
+    alg = _algorithms.by_id(raw[SALT_SIZE + 1] ^ mask[1])
+    if alg is None:
+        return None
+    if not alg.available:
+        unavailable.append(_algorithms.unavailable_error(alg))
+        return None
+    header = raw[:SALT_SIZE] + bytes([VERSION_MESSAGE, alg.id])
+    frame = alg.cipher(prk, VERSION_MESSAGE, header + _aad_block(b"")).open(b"", raw[SALT_SIZE + 2 :])
+    if frame is None or len(frame) < _FRAME.size:
+        return None
+    return frame
+
+
+def _open_legacy(prk: bytes, prefix: str, raw: bytes) -> Optional[bytes]:
+    """Open a token from version 0.2.0 or 0.2.1 (no header, HMAC-SHA256 only)."""
+    if len(raw) < SALT_SIZE + 18 + _LEGACY_TAG_SIZE:
+        return None
+    salt, ciphertext, tag = raw[:SALT_SIZE], raw[SALT_SIZE:-_LEGACY_TAG_SIZE], raw[-_LEGACY_TAG_SIZE:]
+    mac_key = hkdf_expand(prk, _LEGACY_INFO_AUTHENTICATE)
+    expected = hmac.digest(mac_key, prefix.encode("ascii") + salt + ciphertext, "sha256")
+    if not hmac.compare_digest(tag, expected):
+        return None
+    return _algorithms.xor_keystream(hkdf_expand(prk, _LEGACY_INFO_ENCRYPT), ciphertext)
+
+
+def _check_age(created: int, max_age: Optional[float], now: Optional[float]) -> None:
+    if max_age is not None:
+        age = (time.time() if now is None else now) - created
+        if age > max_age:
+            raise TokenExpiredError(f"the token is {int(age)} seconds old (limit {max_age})")
+
+
+def _aad_block(aad: bytes) -> bytes:
+    """Length-prefixed associated data, so its boundary is unambiguous."""
+    return len(aad).to_bytes(8, "big") + aad
+
+
+def _extract(salt: bytes, secret: bytes) -> bytes:
+    return hmac.digest(salt, secret, "sha256")  # HKDF-Extract
+
+
+def _mask(prk: bytes) -> bytes:
+    return hkdf_expand(prk, _MASK_INFO, 3)
+
+
+def _check_salt(salt: bytes) -> bytes:
+    if not isinstance(salt, (bytes, bytearray)) or len(salt) != SALT_SIZE:
+        raise ValueError(f"salt must be {SALT_SIZE} bytes")
+    return bytes(salt)
+
+
+def _check_key(key: object) -> bytes:
+    if not isinstance(key, (bytes, bytearray, memoryview)):
+        raise TypeError(f"a key must be bytes, not {type(key).__name__}")
+    key = bytes(key)
+    if len(key) != KEY_SIZE:
+        raise ValueError(f"a key must be {KEY_SIZE} bytes, not {len(key)}")
+    return key
+
+
 def _secret(salt: bytes, *, key: Optional[bytes] = None, secret: Optional[Secret] = None) -> bytes:
     if (key is None) == (secret is None):
         raise ValueError("pass exactly one of key and secret")
     if key is not None:
-        if len(key) != KEY_SIZE:
-            raise ValueError(f"a key must be {KEY_SIZE} bytes")
-        return bytes(key)
+        return _check_key(key)
     if isinstance(secret, str):
         try:
             material = secret.encode("utf-8")
@@ -228,30 +307,3 @@ def _secret(salt: bytes, *, key: Optional[bytes] = None, secret: Optional[Secret
         maxmem=_SCRYPT_MAXMEM, dklen=KEY_SIZE,
     )
 
-
-def _subkeys(secret: bytes, salt: bytes) -> Tuple[bytes, bytes]:
-    prk = hmac.digest(salt, secret, "sha256")  # HKDF-Extract
-    return _hkdf_expand(prk, _INFO_ENCRYPT), _hkdf_expand(prk, _INFO_AUTHENTICATE)
-
-
-def _hkdf_expand(prk: bytes, info: bytes, length: int = 32) -> bytes:
-    okm, block = b"", b""
-    for counter in range(1, -(-length // 32) + 1):
-        block = hmac.digest(prk, block + info + bytes([counter]), "sha256")
-        okm += block
-    return okm[:length]
-
-
-def _xor_keystream(key: bytes, data: bytes) -> bytes:
-    if not data:
-        return b""
-    stream = b"".join(
-        hmac.digest(key, counter.to_bytes(8, "big"), "sha256")
-        for counter in range(-(-len(data) // 32))
-    )[: len(data)]
-    return (int.from_bytes(data, "big") ^ int.from_bytes(stream, "big")).to_bytes(len(data), "big")
-
-
-def _tag(mac_key: bytes, prefix: str, salt: bytes, ciphertext: bytes) -> bytes:
-    # prefix is "" for new tokens and "yace2_" for tokens made by version 0.2.0.
-    return hmac.digest(mac_key, prefix.encode("ascii") + salt + ciphertext, "sha256")

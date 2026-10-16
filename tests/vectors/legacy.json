@@ -1,0 +1,42 @@
+{
+  "about": "Tokens made by released versions of yace-codec. Every one must keep decrypting. Keys are hex; password tokens used scrypt with N = scrypt_n (r = 8, p = 1).",
+  "vectors": [
+    {
+      "made_by": "0.2.0",
+      "token": "yace2_32joe7Eeqrg2VYKzAx8Aa29ALANd7CjWZJektnTvWA3n6YdHQlimnW3JJT5EvItpz6D7nBNv84hHx7251RgLjreRHfJuPakqFoT0jeMVsGRn",
+      "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "plaintext": "made by 0.2.0",
+      "text": true
+    },
+    {
+      "made_by": "0.2.0",
+      "token": "yace2_KopBtgU1eRvJdFXHMTIKGJ7V9J8Em0QQ364OrHz8DjPW9fGaONvExjP4Kw25owKv361PVerIzq6QG1kyx1U9xHZwBpXHvguFaiR86p1agUV2x90rmMJN",
+      "password": "pw020",
+      "scrypt_n": 1024,
+      "plaintext": "password from 0.2.0",
+      "text": true
+    },
+    {
+      "made_by": "0.2.1",
+      "token": "8zPqlxcgVBdLJg8jLCfmn47V1CdMp5xx4LmcLMuPvtm2IeDhVgCbjUG9cd1LsCGIVQBfZCubbNdJ0EWgGDcL9JtR0JXRbZ9umCL0NapEN7xO",
+      "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "plaintext": "made by 0.2.1",
+      "text": true
+    },
+    {
+      "made_by": "0.2.1",
+      "token": "LrCCmZ8HmUBDj2jPN3oA97CJlBKxOSRC58PtaOmfpJCQG2Xzph9Six73tRfBFI08xwDFcO7wd2Fy1Cgnbbc7l2s5EocceuBb2KUHQZZ3rrb0ZN3UcMVo",
+      "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "plaintext_hex": "00ff62797465732066726f6d20302e322e31",
+      "text": false
+    },
+    {
+      "made_by": "0.2.1",
+      "token": "4d3MNAwNegeCZtKUUeRenDELGwk4iEA2HK9yhjwqaYAg9emz4Gnl9jtEZLqEuubddsAPmzgDp1kutHaqbSC8WDHA0ccomeJBsjJLKDH8MmhkqSKhuODha9hF11xbwiJvxY9F3QtMyy",
+      "password": "pw021",
+      "scrypt_n": 1024,
+      "plaintext": "token from 0.2.1 नमस्ते",
+      "text": true
+    }
+  ]
+}

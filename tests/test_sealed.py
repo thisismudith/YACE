@@ -11,6 +11,7 @@ import pytest
 
 import yace_codec as yace
 from yace_codec import sealed
+from yace_codec._algorithms import hkdf_expand
 from yace_codec.cli import main
 
 
@@ -30,7 +31,7 @@ def codec():
 
 def test_hkdf_matches_rfc5869():
     def hkdf(ikm, salt, info, length):
-        return sealed._hkdf_expand(hmac.digest(salt, ikm, "sha256"), info, length)
+        return hkdf_expand(hmac.digest(salt, ikm, "sha256"), info, length)
 
     assert hkdf(b"\x0b" * 22, bytes(range(13)), bytes(range(0xF0, 0xFA)), 42).hex() == (
         "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"

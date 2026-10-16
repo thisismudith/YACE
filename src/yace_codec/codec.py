@@ -242,6 +242,7 @@ class Codec:
         *,
         token: Optional[sealed.Secret] = None,
         password: Optional[sealed.Secret] = None,
+        algorithm: Optional[str] = None,
     ) -> str:
         """Encrypt ``data`` (any text or bytes) into a token of letters and digits.
 
@@ -251,6 +252,9 @@ class Codec:
         ``"default"``) from the key store is used, and generated on first use.
         ``password`` is another name for ``token``. The result does not reveal
         the key name, the exact length, or anything else about the data.
+
+        ``algorithm`` is one of :func:`~yace_codec.algorithms` (default
+        :data:`~yace_codec.DEFAULT_ALGORITHM`, ``"aes-256-gcm"``).
         """
         secret = _choose_secret(token, password)
         if key is not None and secret is not None:
@@ -265,9 +269,9 @@ class Codec:
         else:
             raise TypeError(f"data must be str or bytes-like, not {type(data).__name__}")
         if secret is not None:
-            return sealed.seal(raw, text=is_text, secret=secret)
+            return sealed.seal(raw, text=is_text, secret=secret, algorithm=algorithm)
         secret = self.keystore.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)
-        return sealed.seal(raw, text=is_text, key=secret)
+        return sealed.seal(raw, text=is_text, key=secret, algorithm=algorithm)
 
     def decrypt(
         self,
@@ -303,14 +307,17 @@ def encrypt(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
+    algorithm: Optional[str] = None,
 ) -> str:
     """Encrypt ``data``; shortcut for ``Codec(keystore).encrypt(...)``.
 
     With a ``token`` (your own secret), the key store is not used at all.
     """
     if (token is not None or password is not None) and keystore is None and key is None:
-        return Codec(KeyStore.in_memory()).encrypt(data, token=token, password=password)
-    return Codec(keystore).encrypt(data, key, token=token, password=password)
+        return Codec(KeyStore.in_memory()).encrypt(
+            data, token=token, password=password, algorithm=algorithm
+        )
+    return Codec(keystore).encrypt(data, key, token=token, password=password, algorithm=algorithm)
 
 
 def decrypt(
