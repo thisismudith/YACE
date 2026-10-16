@@ -24,9 +24,11 @@ from .codec import (
     decode,
     decode_bytes,
     decrypt,
+    decrypt_stream,
     encode,
     encode_bytes,
     encrypt,
+    encrypt_stream,
     generate_key,
     parse_header,
 )
@@ -42,6 +44,7 @@ from .errors import (
     UnsupportedCharacterError,
     YaceError,
 )
+from .sealed import StreamInfo
 from .keystore import ENV_VAR, Family, ImportResult, KeyStore, default_keystore_path
 from .tables import MAX_LENGTH, MIN_LENGTH, SUPPORTED_CHARACTERS, Table
 
@@ -71,6 +74,7 @@ __all__ = [
     "InvalidNameError",
     "KeyStore",
     "KeyStoreError",
+    "StreamInfo",
     "Table",
     "TableNotFoundError",
     "TokenExpiredError",
@@ -81,10 +85,12 @@ __all__ = [
     "decode",
     "decode_bytes",
     "decrypt",
+    "decrypt_stream",
     "default_keystore_path",
     "encode",
     "encode_bytes",
     "encrypt",
+    "encrypt_stream",
     "generate_key",
     "parse_header",
 ]

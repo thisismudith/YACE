@@ -24,13 +24,17 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import os
 import secrets
+import tempfile
 from random import Random
 from typing import (
     Any,
+    BinaryIO,
     Dict,
     Iterable,
+    Iterator,
     List,
     Literal,
     NamedTuple,
@@ -69,9 +73,11 @@ __all__ = [
     "decode",
     "decode_bytes",
     "decrypt",
+    "decrypt_stream",
     "encode",
     "encode_bytes",
     "encrypt",
+    "encrypt_stream",
     "generate_key",
     "parse_header",
 ]
@@ -94,6 +100,7 @@ _CODE_CHARS = frozenset(CODE_ALPHABET)
 _SYSTEM_RANDOM = secrets.SystemRandom()
 
 KeyStoreLike = Union[KeyStore, str, "os.PathLike[str]", None]
+PathLike = Union[str, "os.PathLike[str]"]
 BytesLike = Union[bytes, bytearray, memoryview]
 
 
@@ -321,19 +328,9 @@ class Codec:
         ``output="bytes"`` returns the raw binary token, with no expansion.
         :meth:`decrypt` accepts both.
         """
-        secret = _choose_secret(token, password)
-        if key is not None and secret is not None:
-            raise TypeError("pass either key or token, not both")
+        secrets_ = self._encryption_secret(key, token, password)
         raw, is_text = _plaintext(data)
-        if secret is not None:
-            return sealed.seal(
-                raw, text=is_text, secret=secret, aad=aad, algorithm=algorithm, output=output
-            )
-        if isinstance(key, (bytes, bytearray, memoryview)):
-            raw_key = sealed.check_key(key)
-        else:
-            raw_key = self.keystore.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)
-        return sealed.seal(raw, text=is_text, key=raw_key, aad=aad, algorithm=algorithm, output=output)
+        return sealed.seal(raw, text=is_text, aad=aad, algorithm=algorithm, output=output, **secrets_)
 
     def decrypt(
         self,
@@ -359,6 +356,73 @@ class Codec:
             encrypted, aad=aad, max_age=max_age, **self._decryption_secrets(token, password, keys)
         )
         return data.decode("utf-8") if is_text else data
+
+    def encrypt_stream(
+        self,
+        src: Union[BinaryIO, PathLike],
+        dst: Union[BinaryIO, PathLike],
+        key: Union[str, BytesLike, None] = None,
+        *,
+        token: Optional[sealed.Secret] = None,
+        password: Optional[sealed.Secret] = None,
+        aad: sealed.Aad = b"",
+        algorithm: Optional[str] = None,
+        output: str = "text",
+        text: bool = False,
+        chunk_size: int = sealed.DEFAULT_CHUNK_SIZE,
+    ) -> int:
+        """Encrypt a file or binary stream in constant memory; return the bytes written.
+
+        ``src`` and ``dst`` are binary file objects or paths. A ``dst`` path is
+        written to a temporary file first and only renamed into place when
+        encryption succeeds. The secret, ``aad``, ``algorithm``, and ``output``
+        work as in :meth:`encrypt` (use ``output="bytes"`` for large files).
+        ``text=True`` makes :meth:`decrypt` return ``str``.
+        """
+        secrets_ = self._encryption_secret(key, token, password)
+        with _opened(src, "rb") as reader, _opened(dst, "wb") as writer:
+            return sealed.seal_stream(
+                reader, writer, text=text, aad=aad, algorithm=algorithm, output=output,
+                chunk_size=chunk_size, **secrets_,
+            )
+
+    def decrypt_stream(
+        self,
+        src: Union[BinaryIO, PathLike],
+        dst: Union[BinaryIO, PathLike],
+        *,
+        token: Optional[sealed.Secret] = None,
+        password: Optional[sealed.Secret] = None,
+        keys: Optional[Iterable[BytesLike]] = None,
+        aad: sealed.Aad = b"",
+        max_age: Optional[float] = None,
+    ) -> sealed.StreamInfo:
+        """Decrypt a file or binary stream (any token format) into ``dst``.
+
+        Stream tokens are decrypted in constant memory. Every chunk is verified
+        before it is written, but a truncated or changed stream is only detected
+        when the damaged chunk is reached: if this raises, discard what was
+        written. A ``dst`` path is written to a temporary file and only renamed
+        into place when decryption succeeds, so it is never left incomplete.
+        """
+        secrets_ = self._decryption_secrets(token, password, keys)
+        with _opened(src, "rb") as reader, _opened(dst, "wb") as writer:
+            return sealed.unseal_stream(reader, writer, aad=aad, max_age=max_age, **secrets_)
+
+    def _encryption_secret(
+        self,
+        key: Union[str, BytesLike, None],
+        token: Optional[sealed.Secret],
+        password: Optional[sealed.Secret],
+    ) -> Dict[str, Any]:
+        secret = _choose_secret(token, password)
+        if key is not None and secret is not None:
+            raise TypeError("pass either key or token, not both")
+        if secret is not None:
+            return {"secret": secret}
+        if isinstance(key, (bytes, bytearray, memoryview)):
+            return {"key": sealed.check_key(key)}
+        return {"key": self.keystore.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)}
 
     def _decryption_secrets(
         self,
@@ -456,6 +520,74 @@ def decrypt(
     no_store = keystore is None and (token is not None or password is not None or keys is not None)
     codec = Codec(KeyStore.in_memory() if no_store else keystore)
     return codec.decrypt(encrypted, token=token, password=password, keys=keys, aad=aad, max_age=max_age)
+
+
+def encrypt_stream(
+    src: Union[BinaryIO, PathLike],
+    dst: Union[BinaryIO, PathLike],
+    key: Union[str, BytesLike, None] = None,
+    *,
+    token: Optional[sealed.Secret] = None,
+    password: Optional[sealed.Secret] = None,
+    keystore: KeyStoreLike = None,
+    aad: sealed.Aad = b"",
+    algorithm: Optional[str] = None,
+    output: str = "text",
+    text: bool = False,
+    chunk_size: int = sealed.DEFAULT_CHUNK_SIZE,
+) -> int:
+    """Encrypt a stream; shortcut for ``Codec(keystore).encrypt_stream(...)``."""
+    codec = Codec(KeyStore.in_memory() if _no_store_needed(key, token, password, keystore) else keystore)
+    return codec.encrypt_stream(
+        src, dst, key, token=token, password=password, aad=aad, algorithm=algorithm,
+        output=output, text=text, chunk_size=chunk_size,
+    )
+
+
+def decrypt_stream(
+    src: Union[BinaryIO, PathLike],
+    dst: Union[BinaryIO, PathLike],
+    *,
+    token: Optional[sealed.Secret] = None,
+    password: Optional[sealed.Secret] = None,
+    keys: Optional[Iterable[BytesLike]] = None,
+    aad: sealed.Aad = b"",
+    max_age: Optional[float] = None,
+    keystore: KeyStoreLike = None,
+) -> sealed.StreamInfo:
+    """Decrypt a stream; shortcut for ``Codec(keystore).decrypt_stream(...)``."""
+    no_store = keystore is None and (token is not None or password is not None or keys is not None)
+    codec = Codec(KeyStore.in_memory() if no_store else keystore)
+    return codec.decrypt_stream(
+        src, dst, token=token, password=password, keys=keys, aad=aad, max_age=max_age
+    )
+
+
+@contextlib.contextmanager
+def _opened(target: Union[BinaryIO, PathLike], mode: str) -> Iterator[BinaryIO]:
+    """Yield ``target`` itself, or a file opened at that path.
+
+    Output paths are written to a temporary file next to them and renamed into
+    place only if the block succeeds.
+    """
+    if not isinstance(target, (str, os.PathLike)):
+        yield target
+        return
+    path = os.fspath(target)
+    if mode == "rb":
+        with open(path, "rb") as fh:
+            yield fh
+        return
+    directory, name = os.path.split(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(prefix=f".{name}.", suffix=".part", dir=directory)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            yield fh
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 def generate_key() -> bytes:
