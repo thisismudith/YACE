@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "yace-codec"
 dynamic = ["version"]
-description = "YACE (Yet Another Custom Encoder): reversible text encoding with random substitution tables, plus authenticated encryption with your own secret token, with no dependencies."
+description = "YACE (Yet Another Custom Encoder): reversible text encoding with random substitution tables, plus authenticated encryption (AES-256-GCM, ChaCha20-Poly1305) with streaming, associated data, and key backends."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -20,6 +20,9 @@ keywords = [
     "substitution",
     "obfuscation",
     "encryption",
+    "aes-gcm",
+    "chacha20-poly1305",
+    "aead",
     "decryption",
     "text",
     "cli",

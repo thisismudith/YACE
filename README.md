@@ -1,20 +1,20 @@
 # YACE
 
-**Reversible text encoding with random substitution tables, and authenticated encryption with your own secret token.**
+**Reversible text encoding with random substitution tables, and authenticated encryption (AES-256-GCM by default) with your own secret token or keys.**
 
 [![PyPI](https://img.shields.io/pypi/v/yace-codec)](https://pypi.org/project/yace-codec/)
 [![Python versions](https://img.shields.io/pypi/pyversions/yace-codec)](https://pypi.org/project/yace-codec/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/thisismudith/YACE/blob/main/LICENSE)
 
 YACE (Yet Another Custom Encoder) has two modes. Both come as a Python API and as
-the `yace-codec` command, with no third-party dependencies:
+the `yace-codec` command:
 
 - **Encoding** (`encode`/`decode`) turns text into tokens of random-looking letters
   and digits with YACE's substitution tables. It hides text from casual reading,
   but it is not encryption.
-- **Encryption** (`encrypt`/`decrypt`) turns any text or file into letters and
-  digits that reveal nothing but their approximate size. Only your secret token
-  (or a stored key, if you choose none) can open them.
+- **Encryption** (`encrypt`/`decrypt`) turns any text or file, of any size, into
+  letters and digits (or compact bytes) that reveal nothing but their approximate
+  size. Only your secret token or key can open them, and any change is detected.
 
 | | |
 |---|---|
@@ -28,10 +28,11 @@ exporter.
 
 > **Use `encrypt()` for secrets, never `encode()`.** Encoding is a substitution code
 > with extra noise: frequency analysis, or a couple of tokens whose text an attacker
-> knows, can break it. Encryption is built from standard primitives (scrypt,
-> HKDF-SHA256, and HMAC-SHA256 from Python's standard library), but this project
-> assembled them and nobody has audited the result. For high-stakes secrets, use an
-> audited library such as [`cryptography`](https://cryptography.io/).
+> knows, can break it. Encryption uses AES-256-GCM (or ChaCha20-Poly1305) from the
+> audited [`cryptography`](https://cryptography.io/) package, with standard key
+> derivation, but yace-codec's own formats and the way it combines these parts have
+> not been audited. Read [Security](#security) before you rely on it for high-stakes
+> data.
 
 ## Contents
 
@@ -72,10 +73,11 @@ You can use YACE to:
 |---|---|---|---|---|
 | Who can read it | anyone | holders of the tables, or an attacker with enough samples | holders of the secret token or key | holders of the key |
 | Same input, same output | yes | usually not | no | no |
-| Resists cryptanalysis | no | no | designed to (standard primitives, not audited) | yes (audited) |
+| Resists cryptanalysis | no | no | yes by design (audited AEAD; the format is not audited) | yes (audited) |
 | Detects tampering | no | no (only some corruption) | yes | yes |
 | Hides the length | no | no | roughly (Padmé padding) | no |
-| Output size | 1.33x / 2x | about 1.25 x length<sup>iterations</sup> | about 1.4x plus about 90 characters | about 1.33x plus a fixed overhead |
+| Binds to a context (associated data) | no | no | yes | no |
+| Output size | 1.33x / 2x | about 1.25 x length<sup>iterations</sup> | text: about 1.4x plus 70 characters; bytes: 1.0x plus 51 bytes (plus up to 12% padding) | about 1.33x plus a fixed overhead |
 
 ## How the encoder works
 
@@ -185,7 +187,14 @@ To install the latest code from GitHub:
 python -m pip install "git+https://github.com/thisismudith/YACE.git"
 ```
 
-YACE needs Python 3.10 or newer and has no third-party dependencies.
+YACE needs Python 3.10 or newer. Its one dependency is
+[`cryptography`](https://cryptography.io/), which provides the default encryption
+algorithm. Optional extras:
+
+| Extra | Adds |
+|---|---|
+| `yace-codec[keyring]` | the system keyring as a key backend (`keyring`) |
+| `yace-codec[aead]` | nothing new since 0.3.0 (`cryptography` is always installed); kept so existing install commands work |
 
 ## Quick start
 
@@ -357,70 +366,204 @@ print(yace.decrypt(secret, token="blue-falcon-42"))
 ```
 
 ```text
-3EH3rNDTPGnDlvRImekvmFAwBLPIwRdlI4aTqyfRXG335c06JkRK6e34mxOWK6VIm1Hin7pN1xddMH3FrG6xPd1t8YLuUIOuWydDezMJAgn7ndD1D8K6quWisJBc9JyVFOWE1Aq5xb
+KIenASpyg8G9CtvxNrVgaVBod9zglP5L4HznFPOujEil4IhxYGl0lZlIZfGnGopzVxJugzVWrgHr06AbowWVp6VlDr0Q8UudiuiCmy9En1rrwW1HsPImQ2e
 Meet at the north gate at 06:00.
 ```
 
-The token can be any non-empty text or bytes. With a token, nothing is generated or
-stored, and no key store is involved. Anyone who knows the token can decrypt, so
-choose a long one that is hard to guess.
+`decrypt()` returns `str` for text and `bytes` for bytes. A wrong secret, or any
+change to the encrypted text, raises `DecryptionError`. `max_age` rejects old data:
+`yace.decrypt(secret, token="blue-falcon-42", max_age=3600)` raises
+`TokenExpiredError` for data encrypted more than an hour ago.
 
-Without a token, YACE generates a random key for you, stores it in the
-[key store](#the-key-store) as `default`, and reuses it:
+### Choosing the secret
+
+| Secret | Use it for | Example |
+|---|---|---|
+| Your own token | Sharing with people who know a passphrase | `encrypt(data, token="blue-falcon-42")` |
+| A raw 32-byte key | Applications that manage their own keys | `encrypt(data, key=key)`, `decrypt(out, keys=[key])` |
+| A stored key | Everyday use on one machine or team | `encrypt(data)` or `encrypt(data, "team")` |
+
+**Your own token** can be any non-empty text or bytes. It is stretched with scrypt,
+which makes guessing slow, but anyone who guesses it can decrypt: choose a long one.
+Nothing is generated or stored. `password=` is another name for `token=`.
+
+**A raw key** comes from `yace.generate_key()` (32 random bytes). It is used as is,
+without scrypt or a key store. `decrypt(..., keys=[...])` tries every key in the
+list. Keys of any other size raise `InvalidKeyError`.
+
+```python
+key = yace.generate_key()
+secret = yace.encrypt(b"\x89PNG\r\n\x1a\n...", key=key)
+assert yace.decrypt(secret, keys=[key]) == b"\x89PNG\r\n\x1a\n..."
+```
+
+**A stored key** is generated on first use and kept by a
+[key backend](#key-backends-rotation-and-sharing): by default the
+[key store](#the-key-store) file, under the name `default`. `decrypt()` tries every
+stored key, so the output never names its key.
 
 ```python
 secret = yace.encrypt("Meet at the north gate at 06:00.")
-print(secret)
 print(yace.decrypt(secret))
 ```
 
 ```text
-Htun1NlqKRe8UnQ6To3lBB8ZK9f5NYpzDFkIW9RQrpgwEFQzSMJVYUv8n9AevttNK84oVKc8nEK9C1vX5BAXxunX9VJCVfXTN062Fh3Fk8jivV3mRkvxsUwWRARfBnTaIdq61OSTbb
 Meet at the north gate at 06:00.
 ```
 
-`decrypt()` tries every key in the key store, so the output never names its key.
-Choose another stored key with `yace.encrypt(data, "team")`.
+### Algorithms
 
-`decrypt()` returns `str` for text and `bytes` for bytes. It also offers:
+| Algorithm | Implementation | Speed (bytes output) |
+|---|---|---|
+| `aes-256-gcm` (the default) | AES-256-GCM from the audited [`cryptography`](https://cryptography.io/) package | hundreds of MB/s to GB/s |
+| `chacha20-poly1305` | ChaCha20-Poly1305 from `cryptography`; fast without AES hardware | hundreds of MB/s to GB/s |
+| `yace-hmac-sha256` | HMAC-SHA256 keystream and tag, Python's standard library only | about 20 MB/s |
 
-- `max_age`: `yace.decrypt(secret, max_age=3600)` rejects data encrypted more than an
-  hour ago with `TokenExpiredError`.
-- Tamper detection: a wrong token or key, or any change to the encrypted text, raises
-  `DecryptionError`.
-- Key sharing: export a stored key with `KeyStore.export_key("team")` (CLI:
-  `yace-codec keys export team`) and import it with
-  `import_keys(data, name="team")` (CLI: `yace-codec keys import FILE --name team`).
-  Anyone with the key can decrypt and encrypt with it.
+Choose one with `algorithm=`. The output records which algorithm made it (hidden,
+see below), so `decrypt()` needs no hint. List them with `yace.algorithms()` or
+`yace-codec algorithms`:
 
-`password=` is another name for `token=`, kept from version 0.2.0. Output from 0.2.0
-starts with `yace2_`; it still decrypts.
+```python
+for info in yace.algorithms():
+    print(info.name, "(default)" if info.default else "")
+```
 
-### What the encrypted text reveals
+```text
+aes-256-gcm (default)
+chacha20-poly1305
+yace-hmac-sha256
+```
+
+The default is `aes-256-gcm`, and it only changes in a new minor version with a
+CHANGELOG entry. `cryptography` is installed with yace-codec. If you install with
+`pip install --no-deps yace-codec`, only `yace-hmac-sha256` works: pass it
+explicitly, because the default raises `EncodingError` without `cryptography`.
+
+### Associated data
+
+`aad=` ties the output to a context, such as a database row, a user, or a file name.
+The associated data is authenticated but not stored, so decryption needs the same
+value. That stops a valid ciphertext from being moved to another record:
+
+```python
+key = yace.generate_key()
+row_1 = yace.encrypt("salary: 85000", key=key, aad="row:1")
+assert yace.decrypt(row_1, keys=[key], aad="row:1") == "salary: 85000"
+try:
+    yace.decrypt(row_1, keys=[key], aad="row:2")  # copied into row 2
+except yace.DecryptionError:
+    print("rejected")
+```
+
+```text
+rejected
+```
+
+`aad` accepts bytes, or text (encoded as UTF-8).
+
+### Text or bytes output
+
+`output="text"` (the default) gives letters and digits, safe to paste anywhere.
+`output="bytes"` gives the raw binary form, about 27% smaller and much faster to
+produce. `decrypt()` accepts both, and text given as bytes (with or without a byte
+order mark).
+
+```python
+raw = yace.encrypt("Meet at the north gate at 06:00.", key=key, output="bytes")
+print(type(raw).__name__, len(raw))
+```
+
+```text
+bytes 86
+```
+
+### Large files: streaming
+
+`encrypt_stream()` and `decrypt_stream()` work on binary files or paths in constant
+memory, whatever the size:
+
+```python
+import io
+
+source = io.BytesIO(b"a large file" * 100_000)
+encrypted, restored = io.BytesIO(), io.BytesIO()
+yace.encrypt_stream(source, encrypted, key=key, output="bytes")
+encrypted.seek(0)
+info = yace.decrypt_stream(encrypted, restored, keys=[key])
+print(info.size == len(source.getvalue()) == len(restored.getvalue()))
+```
+
+```text
+True
+```
+
+Data is encrypted in chunks (64 KiB by default). Each chunk's nonce holds its index
+and a final-chunk flag, so a stream that was truncated, reordered, or spliced with
+chunks from elsewhere fails to decrypt. `decrypt_stream()` verifies every chunk
+before writing it, but it can only notice truncation at the end: if it raises,
+discard what it wrote. Given a path as the destination, both functions write a
+temporary file and rename it only when everything succeeded. `decrypt()` also reads
+stream output (in memory), and `decrypt_stream()` reads every format.
+
+### Key backends, rotation, and sharing
+
+Stored keys live in a *key backend*. Pass one as `key_backend=` (to `Codec` or to the
+functions), or `--key-backend` on the command line:
+
+| Backend | Where the keys are | Notes |
+|---|---|---|
+| `KeyStore` (`json`, the default) | the key store JSON file | **plain text** (base64): anyone who can read the file can decrypt. New files are readable by you only. |
+| `DpapiKeyStore` (`dpapi`) | `keys-dpapi.json` next to the key store | Windows only. Keys are encrypted with DPAPI for your Windows account, so a copied file is useless elsewhere. |
+| `KeyringKeyStore` (`keyring`) | the system keyring (Windows Credential Manager, macOS Keychain, Secret Service) | Needs `pip install "yace-codec[keyring]"`. |
+
+```python
+backend = yace.open_key_backend("json", path="team-keys.json")
+codec = yace.Codec(key_backend=backend)
+old = codec.encrypt("before rotation", "team")
+backend.rotate_key("team")  # new key for new data; the old one is kept for decryption
+new = codec.encrypt("after rotation", "team")
+print(codec.decrypt(old), "/", codec.decrypt(new))
+```
+
+```text
+before rotation / after rotation
+```
+
+`rotate_key()` gives a key a new value and keeps the previous ones as *retired* keys:
+they still decrypt, but nothing new is encrypted with them. `delete_key()` removes a
+key with its retired keys. To share a key, `export_key("team")` (CLI:
+`yace-codec keys export team`) gives portable JSON, including retired keys, and
+`import_keys(data, name="team")` (CLI: `yace-codec keys import FILE --name team`)
+adds it to another backend. Anyone with a key can decrypt and encrypt with it.
+
+### What the encrypted output reveals
 
 Only roughly how long the data is: the size is padded to a Padmé length, which leaks
-at most a few bits. It has no prefix or header, so it does not say that YACE made it.
-The key name, the exact length, the creation time, and whether the data was text or
-bytes are all encrypted. The same data gives different output every time.
+at most a few bits. The output has no prefix or readable header: the format version
+and algorithm are hidden with a key-derived mask, so the output does not show that
+YACE made it. The key name, the exact length, the creation time, and whether the
+data was text or bytes are all encrypted. The same data gives different output every
+time.
 
 ### How encryption works
 
 1. A random 16-byte salt is drawn every time.
-2. The secret is your token stretched with scrypt (N = 2<sup>17</sup>, r = 8, p = 1)
-   and the salt, or a 32-byte key from the key store.
-3. HKDF-SHA256 (RFC 5869) derives two keys from the secret and the salt: one to
-   encrypt and one to authenticate. Every output gets its own pair.
+2. The secret is a 32-byte key, or your token stretched with scrypt
+   (N = 2<sup>17</sup>, r = 8, p = 1) and the salt.
+3. HKDF-SHA256 (RFC 5869) derives, from the secret and the salt, the algorithm's key
+   (and nonce, or keys) and a mask for the format version and algorithm id. Every
+   output gets its own keys, so nonces never repeat under a key.
 4. A frame holds the data type, the creation time, the length, the data, and zero
    padding up to a Padmé length.
-5. The frame is XORed with a keystream of HMAC-SHA256 blocks in counter mode.
-6. An HMAC-SHA256 tag covers the salt and the ciphertext. Decryption checks it
-   first, with a constant-time comparison, so wrong secrets and changed text are
-   rejected before anything is decrypted.
-7. The salt, ciphertext, and tag are written as letters and digits: every 8 bytes
-   become 11 characters ("YACE62").
+5. The algorithm encrypts the frame. Its tag covers the salt, the (unmasked) version
+   and algorithm id, the length-prefixed associated data, and the ciphertext.
+6. Output is `salt || masked header || ciphertext || tag`, as bytes or as letters and
+   digits (YACE62: every 8 bytes become 11 characters).
 
-Every building block comes from Python's standard library (`hashlib`, `hmac`, and
-`secrets`).
+The byte-level format, for versions 3 (messages) and 4 (streams), is in
+[SECURITY.md](https://github.com/thisismudith/YACE/blob/main/SECURITY.md), and
+`tests/vectors/` has test vectors for every algorithm. Output from versions 0.2.0
+(it starts with `yace2_`) and 0.2.1 still decrypts.
 
 ## Command line
 
@@ -454,13 +597,13 @@ $ yace-codec encode --binary photo.jpg -o photo.yace
 $ yace-codec decode --binary photo.yace -o photo-copy.jpg
 ```
 
-Encrypt and decrypt (any file works, byte for byte):
+Encrypt and decrypt (any file works, byte for byte, in constant memory):
 
 ```console
 $ yace-codec encrypt --token --text "Meet at the north gate at 06:00."
 Secret token:
 Repeat secret token:
-3EH3rNDTPGnDlvRImekvmFAwBLPIwRdlI4aTqyfRXG335c06JkRK6e34mxOWK6VIm1Hin7pN1xddMH3FrG6xPd1t8YLuUIOuWydDezMJAgn7ndD1D8K6quWisJBc9JyVFOWE1Aq5xb
+KIenASpyg8G9CtvxNrVgaVBod9zglP5L4HznFPOujEil4IhxYGl0lZlIZfGnGopzVxJugzVWrgHr06AbowWVp6VlDr0Q8UudiuiCmy9En1rrwW1HsPImQ2e
 
 $ yace-codec encrypt --token notes.txt -o notes.yace
 Secret token:
@@ -471,20 +614,42 @@ Shopping list:
 - milk
 - 12 eggs
 
-$ yace-codec encrypt secret.pdf -o secret.yace --key team
-$ yace-codec decrypt secret.yace -o secret-copy.pdf
+$ yace-codec encrypt backup.tar -o backup.yace --key team --format bytes
+$ yace-codec decrypt backup.yace -o backup-copy.tar
+
+$ yace-codec encrypt invoice.pdf -o invoice.yace --aad "customer:42" --algorithm chacha20-poly1305
+$ yace-codec decrypt invoice.yace -o invoice-copy.pdf --aad "customer:42"
+
+$ yace-codec algorithms
+aes-256-gcm        AES-256 in GCM mode (needs the cryptography package) [default]
+chacha20-poly1305  ChaCha20-Poly1305 (fast without AES hardware; needs the cryptography package)
+yace-hmac-sha256   HMAC-SHA256 keystream and tag (standard library only; slower, not audited)
 
 $ yace-codec keys list
 default
 team
+$ yace-codec keys rotate team
+rotated key 'team': new data uses the new key; data encrypted before still decrypts (...)
 ```
 
-`--token` (or `-p`) asks for your secret token (twice when encrypting), so it never
-appears in your shell history. Without `--token`, a stored key is used. Scripts can
-set `YACE_CODEC_TOKEN` instead, but other programs running as you may be able to
-read environment variables. `--password` and `YACE_CODEC_PASSWORD`, from 0.2.0,
-still work. `keys import` needs `--name NAME` (or `--all-keys`), for the same
-reason as `tables import` below.
+How to give your secret token, safest first:
+
+- `--token` (or `-p`) asks for it without echoing it (twice when encrypting).
+- `--token-file PATH` reads it from a file you protect (one trailing newline is
+  ignored).
+- `--token-stdin` reads it from the first line of standard input, for scripts. Give
+  the data as a file or with `--text`.
+
+The `YACE_CODEC_TOKEN` and `YACE_CODEC_PASSWORD` environment variables still work
+with `--token`, but they are deprecated: other programs running as you can read
+environment variables. Using them prints a warning. Without a token option, a stored
+key is used (`--key NAME`, default `default`), from the backend chosen with
+`--key-backend json|dpapi|keyring`.
+
+`-o PATH` is written to a temporary file that replaces `PATH` only when everything
+succeeded, so a failed decryption never leaves a partial file. Standard output
+cannot be taken back: if decryption fails part way, discard what was printed.
+`keys import` needs `--name NAME` (or `--all-keys`), and `keys delete` needs `--yes`.
 
 Inspect and share tables:
 
@@ -523,11 +688,14 @@ yace-codec: error: groceries.json holds tables for: groceries. Name the family y
 | `tables list` | `-k/--keystore PATH` |
 | `tables export NAME` | `-o/--output PATH`, `-k/--keystore PATH` |
 | `tables import FILE` | `--family NAME` or `--all-families` (one is required), `--overwrite`, `-k/--keystore PATH` (use `-` as `FILE` for standard input) |
-| `encrypt [INPUT]` | `-t/--text TEXT`, `-o/--output PATH`, `--key NAME` (default `default`) or `-p/--token`, `-k/--keystore PATH` |
-| `decrypt [INPUT]` | `-t/--text TEXT`, `-o/--output PATH`, `-p/--token`, `--max-age SECONDS`, `-k/--keystore PATH` |
-| `keys list` | `-k/--keystore PATH` |
-| `keys export NAME` | `-o/--output PATH`, `-k/--keystore PATH` |
-| `keys import FILE` | `--name NAME` or `--all-keys` (one is required), `--overwrite`, `-k/--keystore PATH` |
+| `encrypt [INPUT]` | `-t/--text TEXT`, `-o/--output PATH`, one of `--key NAME` (default `default`), `-p/--token`, `--token-file PATH`, `--token-stdin`; `-a/--algorithm NAME`, `--aad TEXT`, `-f/--format text\|bytes`, `--key-backend json\|dpapi\|keyring`, `-k/--keystore PATH` |
+| `decrypt [INPUT]` | `-t/--text TEXT`, `-o/--output PATH`, one of `-p/--token`, `--token-file PATH`, `--token-stdin`; `--aad TEXT`, `--max-age SECONDS`, `--key-backend ...`, `-k/--keystore PATH` |
+| `algorithms` | |
+| `keys list` | `--key-backend ...`, `-k/--keystore PATH` |
+| `keys rotate NAME` | `--key-backend ...`, `-k/--keystore PATH` |
+| `keys delete NAME` | `--yes` (required), `--key-backend ...`, `-k/--keystore PATH` |
+| `keys export NAME` | `-o/--output PATH`, `--key-backend ...`, `-k/--keystore PATH` |
+| `keys import FILE` | `--name NAME` or `--all-keys` (one is required), `--overwrite`, `--key-backend ...`, `-k/--keystore PATH` |
 
 Text mode reads and writes UTF-8 and keeps line endings unchanged, so `decode`
 returns exactly the bytes that were encoded. Token and JSON files saved by Windows
@@ -546,21 +714,27 @@ Everything below is importable from `yace_codec`.
 | `decode(token, *, keystore=None) -> str` | Decode a token: a `str`, or `bytes` in UTF-8 (UTF-16 and UTF-32 need a byte order mark). |
 | `encode_bytes(data, name="default", *, length=2, iterations=3, keystore=None) -> str` | Encode any bytes (base64 first). |
 | `decode_bytes(token, *, keystore=None) -> bytes` | Decode a token made by `encode_bytes`. |
-| `encrypt(data, key=None, *, token=None, keystore=None) -> str` | Encrypt text or bytes into letters and digits, with your own secret `token` (text or bytes) or a stored key (default `"default"`, generated on first use). |
-| `decrypt(encrypted, *, token=None, max_age=None, keystore=None) -> str \| bytes` | Decrypt the output of `encrypt`; returns `str` or `bytes`, as encrypted. |
-| `parse_header(token) -> Header` | Read a token's header without decoding it. |
+| `encrypt(data, key=None, *, token=None, keystore=None, key_backend=None, aad=b"", algorithm=None, output="text") -> str \| bytes` | Encrypt text or bytes. The secret is your `token`, a raw 32-byte `key`, or a stored key named `key` (default `"default"`, generated on first use). Returns `str` for `output="text"`, `bytes` for `output="bytes"`. |
+| `decrypt(encrypted, *, token=None, keys=None, aad=b"", max_age=None, keystore=None, key_backend=None) -> str \| bytes` | Decrypt any format (text or bytes, message or stream, 0.2.x included); returns `str` or `bytes`, as encrypted. `keys` limits decryption to those raw keys. |
+| `encrypt_stream(src, dst, key=None, *, token=None, keystore=None, key_backend=None, aad=b"", algorithm=None, output="text", text=False, chunk_size=65536) -> int` | Encrypt a binary file object or path in constant memory; returns the bytes written. |
+| `decrypt_stream(src, dst, *, token=None, keys=None, aad=b"", max_age=None, keystore=None, key_backend=None) -> StreamInfo` | Decrypt into a binary file object or path. |
+| `generate_key() -> bytes` | A new random 32-byte key. |
+| `algorithms() -> list[AlgorithmInfo]` | The encryption algorithms, the default first. |
+| `open_key_backend(kind, *, path=None, service="yace-codec") -> KeyBackend` | Open the `"json"`, `"dpapi"`, or `"keyring"` backend. |
+| `parse_header(token) -> Header` | Read an encoded token's header without decoding it. |
 | `default_keystore_path() -> pathlib.Path` | Where the default key store lives (an absolute path). |
 
 `keystore` accepts a `KeyStore`, a path to a key store file, or `None` for the
-default key store.
+default key store. `password=` is accepted everywhere as another name for `token=`.
 
-### `Codec(keystore=None, *, rng=None)`
+### `Codec(keystore=None, *, rng=None, key_backend=None)`
 
 Encodes, decodes, encrypts, and decrypts with one key store. It has the same
-`encode`, `decode`, `encode_bytes`, `decode_bytes`, `encrypt`, and `decrypt`
-methods as the functions above (without the `keystore` argument), and a
-`keystore` attribute. `rng` replaces the system random
-source with a `random.Random`, for reproducible tests only.
+`encode`, `decode`, `encode_bytes`, `decode_bytes`, `encrypt`, `decrypt`,
+`encrypt_stream`, and `decrypt_stream` methods as the functions above (without the
+`keystore` and `key_backend` arguments), and `keystore` and `keys` (the key backend)
+attributes. `rng` replaces the system random source with a `random.Random`, for
+reproducible tests only.
 
 ### `KeyStore(path)`
 
@@ -579,17 +753,30 @@ the `KeyStore` is created. The file is created on the first write.
 | `families() -> list[Family]` | Tables grouped as `Family(name, length, layers)`. |
 | `export_family(family) -> dict` | All tables of a family, as JSON-ready data. |
 | `import_tables(tables, *, overwrite=False, family=None) -> ImportResult` | Add tables; with `family`, only that family's. Returns `ImportResult(added, unchanged, replaced)`. |
-| `ensure_key(name, *, rng=None) -> bytes` | Return a secret key for `encrypt`, generating it if missing. |
-| `get_key(name) -> bytes`, `find_key(name) -> bytes \| None` | Return a secret key. |
-| `key_names() -> list[str]` | Names of the stored secret keys. |
-| `export_key(name) -> dict` | A secret key as JSON-ready data. |
-| `import_keys(keys, *, overwrite=False, name=None) -> ImportResult` | Add secret keys; with `name`, only that key. |
 | `reload()` | Drop cached data and re-read the file on next use. |
 | `name in store`, `len(store)` | Membership test and table count. |
+
+`KeyStore` is also the default key backend, with the methods below.
 
 `import_tables` validates every table before it writes anything, and it writes
 nothing when every table is already present. It raises `KeyStoreError` if a table
 already exists with different codes, unless `overwrite=True`.
+
+### Key backends
+
+`KeyBackend` is the interface; `KeyStore`, `DpapiKeyStore(path=None)` (Windows), and
+`KeyringKeyStore(service="yace-codec")` implement it:
+
+| Member | Description |
+|---|---|
+| `ensure_key(name, *, rng=None) -> bytes` | The current key `name`, generated and saved if missing. |
+| `get_key(name) -> bytes`, `find_key(name) -> bytes \| None` | The current key `name`. |
+| `key_names() -> list[str]` | Names of the stored keys. |
+| `rotate_key(name, *, rng=None) -> bytes` | A new key for `name`; the old one is kept (retired) for decryption. |
+| `delete_key(name)` | Remove a key and its retired keys. |
+| `decryption_keys() -> list[bytes]` | Every current and retired key. |
+| `export_key(name) -> dict` | A key and its retired keys as portable JSON data. |
+| `import_keys(keys, *, overwrite=False, name=None) -> ImportResult` | Add keys; with `name`, only that key. |
 
 ### Data types
 
@@ -599,27 +786,32 @@ already exists with different codes, unless `overwrite=True`.
   mapping from character to code), `space_codes`, `bin_codes`, and `characters` (what
   it can encode), plus `to_dict()`, `Table.from_dict(name, data)`, and
   `Table.generate(name, rng)`.
+- `StreamInfo(size, text)`: what `decrypt_stream` wrote, and whether it was text.
+- `AlgorithmInfo(name, id, tag_size, available, default, description)`.
 
 ### Exceptions
 
 ```text
 YaceError
 ├── InvalidNameError           invalid family name (also a ValueError)
-├── EncodingError              invalid settings (also a ValueError)
+├── InvalidKeyError            a raw key is not 32 bytes (also a ValueError)
+├── EncodingError              invalid settings, unknown algorithm (also a ValueError)
 │   └── UnsupportedCharacterError   .characters, .table_name
 ├── DecodingError              malformed or corrupted token, or wrong tables (also a ValueError)
-│   └── DecryptionError        encrypted text cannot be opened: wrong token or key, or changed
+│   └── DecryptionError        cannot be opened: wrong token, key, or aad, or changed
 │       └── TokenExpiredError  it was encrypted longer ago than max_age
-├── TableNotFoundError         a needed table is missing; .table_name (also a LookupError)
-└── KeyStoreError              unreadable, invalid, or unwritable key store
+├── TableNotFoundError         a needed table or key is missing; .table_name (also a LookupError)
+└── KeyStoreError              unreadable, invalid, or unwritable key store or backend
 ```
+
+Messages and `repr()` never contain keys or secret tokens.
 
 ### Constants
 
-`DEFAULT_FAMILY` (`"default"`), `DEFAULT_KEY` (`"default"`), `DEFAULT_LENGTH` (2), `DEFAULT_ITERATIONS` (3),
-`MIN_LENGTH` (2), `MAX_LENGTH` (62), `MAX_ITERATIONS` (32), `MAX_ENCODED_CHARS`
-(2<sup>25</sup>), `SUPPORTED_CHARACTERS`, `ENV_VAR` (`"YACE_CODEC_KEYSTORE"`), and
-`__version__`.
+`DEFAULT_ALGORITHM` (`"aes-256-gcm"`), `DEFAULT_FAMILY` (`"default"`), `DEFAULT_KEY`
+(`"default"`), `DEFAULT_LENGTH` (2), `DEFAULT_ITERATIONS` (3), `MIN_LENGTH` (2),
+`MAX_LENGTH` (62), `MAX_ITERATIONS` (32), `MAX_ENCODED_CHARS` (2<sup>25</sup>),
+`SUPPORTED_CHARACTERS`, `ENV_VAR` (`"YACE_CODEC_KEYSTORE"`), and `__version__`.
 
 ## The key store
 
@@ -642,7 +834,10 @@ original scripts' `encodings.json`:
 ```
 
 Secret keys for `encrypt` live in the same file, as entries named `key:<name>` that
-hold a base64 `secret` of 32 random bytes.
+hold a base64 `secret` of 32 random bytes and, after `rotate_key()`, a `retired`
+list. **These keys are stored in plain text:** anyone who can read the file can
+decrypt. Keep the file private, or keep keys in the `dpapi` or `keyring`
+[key backend](#key-backends-rotation-and-sharing) instead.
 
 How the key store behaves:
 
@@ -652,10 +847,13 @@ How the key store behaves:
   store, so a crash cannot leave a half-written file. A symbolic link is followed,
   so the file it points to is updated and the link stays. A key store with more than
   one hard link is refused instead, because replacing it would split the copies.
-- **Permissions are kept.** New key store files get mode `0600`, and a new
-  `yace-codec` directory gets mode `0700`, on POSIX. An existing key store keeps its
-  access control list on Windows, and its mode on POSIX, plus its owner and group
-  where the system allows it.
+- **New files are private.** New key store files get mode `0600`, and a new
+  `yace-codec` directory gets mode `0700`, on POSIX. On Windows, new key store files
+  get an access control list that allows only you (and the SYSTEM account), with
+  nothing inherited from the folder.
+- **Existing permissions are kept.** An existing key store keeps its access control
+  list on Windows, and its mode on POSIX, plus its owner and group where the system
+  allows it, so a deliberately shared key store stays shared.
 - **Concurrent writers are safe.** Writes are serialised with a `keystore.json.lock`
   file next to the key store, so parallel processes never lose each other's tables.
   Reading, and encoding with tables that already exist, need no write access.
@@ -683,8 +881,15 @@ encrypted with its keys becomes unreadable. Anyone who has it can read those tok
   token character, so tokens near the size limit need 1–2 GB. YACE is meant for
   strings and small to medium files, not streams.
 - **Empty input.** Encoding `""` gives a header-only token, which decodes to `""`.
-- **Encryption size.** `encrypt()` holds the data and the output in memory. The
-  output is about 1.4 times the size of the data, plus about 90 characters.
+- **Encryption size and memory.** `encrypt()` and `decrypt()` hold the data and
+  the output in memory; `encrypt_stream()` and `decrypt_stream()` (and the command
+  line) use constant memory for any size. Text output is about 1.4 times the size of
+  the data plus about 70 characters; bytes output adds 51 bytes plus Padmé padding
+  (at most about 12%, less for large data).
+- **Encryption speed.** With `output="bytes"`, `aes-256-gcm` and `chacha20-poly1305`
+  run at hundreds of MB/s or more; `yace-hmac-sha256` at about 20 MB/s. Text output
+  is limited to roughly 10–20 MB/s by its pure-Python letters-and-digits encoding.
+  Run `python benchmarks/bench.py` to measure your machine.
 - **Whitespace.** Decoding ignores whitespace in a token, so wrapped lines, CRLF line
   endings, and leading blank lines are fine.
 - **Corruption.** Decoding raises `DecodingError` when a chunk is not a valid code,
@@ -720,25 +925,32 @@ encrypted with its keys becomes unreadable. Anyone who has it can read those tok
 
 ### Encryption (`encrypt`)
 
-- Confidentiality and integrity rest on HMAC-SHA256 as a pseudorandom function (for
-  the keystream and the tag), HKDF-SHA256 for per-output keys, and scrypt for
-  secret tokens. These are standard, well-studied constructions, but this project
-  assembled them and nobody has audited the result. For high-stakes secrets, use an
-  audited library such as [`cryptography`](https://cryptography.io/).
+- **Not audited.** `aes-256-gcm` and `chacha20-poly1305` come from the audited
+  [`cryptography`](https://cryptography.io/) package, and the key derivation uses
+  standard constructions (HKDF-SHA256, scrypt). How yace-codec combines them (the
+  formats, the header mask, the stream construction) has not been audited by anyone.
+  For high-stakes data, use the default `aes-256-gcm` (or `chacha20-poly1305`), and
+  consider an audited higher-level tool.
+- `yace-hmac-sha256` uses only the standard library. It is a sound construction
+  (HMAC-SHA256 as a pseudorandom function, encrypt-then-MAC), but it is slower and
+  pure Python gives no protection against attackers who can measure timing or memory
+  on your machine.
 - Encryption with your own token is only as strong as the token. scrypt makes each
-  guess slow, but a short or common token can still be found. Stored keys are 32
-  random bytes.
-- The key store holds the keys: anyone who copies it can open everything encrypted
-  with its keys. Encryption with your own token does not depend on the key store.
-- The output hides the key name, the creation time, and the exact length, but not
+  guess slow, but a short or common token can still be found. Raw and stored keys are
+  32 random bytes.
+- The JSON key store holds keys in plain text: anyone who copies it can decrypt
+  everything encrypted with its keys. Use `DpapiKeyStore` or `KeyringKeyStore` to keep
+  keys out of plain files.
+- There is no forward secrecy: a leaked token or key opens everything encrypted with
+  it, including earlier data. Rotation limits new exposure, not old.
+- The output hides the key name, algorithm, creation time, and exact length, but not
   roughly how long the data is.
-- There is no forward secrecy (a leaked token or key opens everything encrypted
-  with it earlier),
-  and pure Python gives no protection against attackers who can measure timing or
-  memory on your machine.
+- `decrypt_stream()` writes verified chunks before it reaches the end, so a truncated
+  stream is detected only at the end; discard the output when it raises.
 
-To report a bug, including a security issue in the code, please
-[open an issue](https://github.com/thisismudith/YACE/issues).
+See [SECURITY.md](https://github.com/thisismudith/YACE/blob/main/SECURITY.md) for the
+threat model, the format specification, supported versions, and how to report a
+vulnerability privately.
 
 ## Migrating from the original scripts
 
@@ -796,12 +1008,15 @@ git clone https://github.com/thisismudith/YACE.git
 cd YACE
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-python -m pip install -e .
-python examples/quickstart.py
+python -m pip install -e ".[test]"
+python -m pytest
+python benchmarks/bench.py         # throughput per algorithm (not a test)
 ```
 
-To build the wheel and source distribution into `dist/`, run
-`python -m pip install build` and then `python -m build`.
+The tests include the published test vectors in `tests/vectors/` (with an
+independent implementation that decrypts them), property-based tests, and tokens
+made by earlier releases. To build the wheel and source distribution into `dist/`,
+run `python -m pip install build` and then `python -m build`.
 
 ## Contributing
 
@@ -811,7 +1026,8 @@ Issues and pull requests are welcome at
 1. Open an issue first for larger changes.
 2. Keep the token and key store formats backward compatible: tokens made by earlier
    versions, and by the original scripts, must keep decoding.
-3. Run the scripts in `examples/` to check your change.
+3. Run `python -m pytest`; the tests also run the scripts in `examples/` and the
+   Python examples in this README.
 
 ## License
 

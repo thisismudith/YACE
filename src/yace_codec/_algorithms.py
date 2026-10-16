@@ -199,7 +199,7 @@ class _Aead(_Algorithm):
 _ALGORITHMS: List[_Algorithm] = [
     _Aead(
         "aes-256-gcm", 2,
-        "AES-256 in GCM mode (the default; needs the cryptography package)",
+        "AES-256 in GCM mode (needs the cryptography package)",
         "AESGCM",
     ),
     _Aead(

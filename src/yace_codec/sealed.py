@@ -22,6 +22,10 @@ Format version 3 (a single message)::
    prefixed associated data, and the ciphertext.
 6. Text output is YACE62: 8-byte blocks as 11 letters and digits.
 
+Format version 4 (a stream, :func:`seal_stream`) splits the data into chunks
+that are sealed one by one, with the chunk index and a final-chunk flag in each
+nonce. SECURITY.md specifies both formats byte by byte.
+
 Tokens from versions 0.2.0 (``yace2_`` prefix) and 0.2.1 still decrypt.
 """
 

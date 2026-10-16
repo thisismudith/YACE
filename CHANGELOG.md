@@ -4,6 +4,69 @@ All notable changes to this project are documented in this file. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-10-16
+
+Output of 0.3.0 cannot be decrypted by 0.2.x. Everything 0.2.x made still decrypts.
+
+### Added
+
+- **Versioned token format.** Messages (format 3) and streams (format 4) carry a
+  version byte and an algorithm id, authenticated by the tag and hidden with a
+  key-derived mask, so output still has no recognisable prefix. SECURITY.md
+  specifies both formats byte by byte.
+- **Algorithms:** `aes-256-gcm` (the default) and `chacha20-poly1305` from the
+  audited `cryptography` package, and the standard-library `yace-hmac-sha256`.
+  Choose with `algorithm=` or `--algorithm`; list them with `algorithms()` or
+  `yace-codec algorithms`. Decryption reads the algorithm from the output.
+- **Associated data:** `aad=` (and `--aad`) binds output to a context; a wrong `aad`
+  raises `DecryptionError`.
+- **Raw keys:** `encrypt(data, key=<32 bytes>)`, `decrypt(out, keys=[...])`, and
+  `generate_key()`, with no key store and no scrypt. Other key sizes raise the new
+  `InvalidKeyError`.
+- **Output format:** `output="bytes"` (and `--format bytes`) gives raw binary output
+  with no expansion; `"text"` stays the default. `decrypt()` accepts both.
+- **Streaming:** `encrypt_stream()` and `decrypt_stream()` encrypt files of any size
+  in constant memory, in chunks whose nonces hold the chunk index and a final flag
+  (the STREAM construction), so truncation, reordering, and duplication are
+  detected. Paths are written to a temporary file and renamed only on success.
+  `decrypt()` also reads streams, and `decrypt_stream()` reads every format.
+- **Key backends:** the `KeyBackend` interface, `Codec(key_backend=...)`,
+  `open_key_backend()`, and `--key-backend`. New `DpapiKeyStore` (Windows; keys
+  encrypted with DPAPI through ctypes) and `KeyringKeyStore` (the system keyring;
+  `pip install "yace-codec[keyring]"`).
+- **Key rotation:** `rotate_key()` and `yace-codec keys rotate` keep the previous
+  key for decryption; `delete_key()` and `yace-codec keys delete --yes` remove one.
+- **Command line:** `--token-file PATH` and `--token-stdin`; `encrypt`/`decrypt`
+  stream files in constant memory and only replace `-o` files on success.
+- `SECURITY.md` with the threat model, the format specification, supported
+  versions, and private vulnerability reporting.
+- The test suite ships in the sdist and runs in CI on Linux, Windows, and macOS: test
+  vectors for every algorithm and format (`tests/vectors/`), an independent
+  implementation that decrypts them, hypothesis property tests, tamper, stream, and
+  legacy tests. `benchmarks/bench.py` reports throughput.
+
+### Changed
+
+- **The default algorithm is now `aes-256-gcm`**, and `cryptography` is a
+  dependency. (0.2.x used what is now `yace-hmac-sha256`.)
+- Python 3.10 or newer is required (3.9 reached end of life in October 2025).
+- New key store files are readable only by their owner on Windows too (an access
+  control list for you and SYSTEM, with nothing inherited).
+- Key entries can hold a `retired` list after rotation; 0.2.x ignores it and keeps
+  using the current key.
+- YACE62 text encoding is about twice as fast.
+
+### Deprecated
+
+- The `YACE_CODEC_TOKEN` and `YACE_CODEC_PASSWORD` environment variables: they still
+  work with `--token`, but print a warning and raise `DeprecationWarning`. Use the
+  prompt, `--token-file`, or `--token-stdin`.
+
+### Security
+
+- Releases are built with hash-pinned build tools and actions pinned to commits, and
+  publish build provenance attestations.
+
 ## [0.2.1] - 2026-10-15
 
 ### Added

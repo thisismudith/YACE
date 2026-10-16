@@ -8,7 +8,8 @@ substitution tables.
 'Hello, World!'
 
 encode()/decode() only obfuscate text. For secrets, use encrypt()/decrypt(),
-which encrypt with your own secret token or a stored key.
+which encrypt with AES-256-GCM (by default) using your own secret token, a raw
+key, or a stored key.
 """
 
 from ._algorithms import DEFAULT_ALGORITHM, AlgorithmInfo, algorithms
@@ -49,7 +50,7 @@ from .keybackends import DpapiKeyStore, KeyBackend, KeyringKeyStore, open_key_ba
 from .keystore import ENV_VAR, Family, ImportResult, KeyStore, default_keystore_path
 from .tables import MAX_LENGTH, MIN_LENGTH, SUPPORTED_CHARACTERS, Table
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 __all__ = [
     "DEFAULT_ALGORITHM",
