@@ -23,6 +23,17 @@ PathLike = Union[str, "os.PathLike[str]"]
 #: a "normal" file gets its folder's inherited permissions.
 Access = Literal["normal", "private", "secret"]
 
+
+def _read_umask() -> int:
+    """The process umask, read once at import (setting it is not thread-safe)."""
+    if sys.platform == "win32":
+        return 0o022
+    umask = os.umask(0o022)
+    os.umask(umask)
+    return umask
+
+
+_UMASK = _read_umask()
 _REPLACE_RETRIES = 40  # Windows briefly denies access while another program reads the file
 _RETRY_DELAY = 0.05
 
@@ -38,17 +49,18 @@ def atomic_output(target: PathLike, access: Access = "normal") -> Iterator[Binar
     ``target``, not the temporary file.
     """
     name = os.fspath(target)
-    path = os.path.realpath(name)
-    if os.path.isdir(path):
-        raise IsADirectoryError(errno.EISDIR, "is a directory", name)
     try:
-        existing: Optional[os.stat_result] = os.stat(path)
+        existing: Optional[os.stat_result] = os.stat(name)  # follows links, e.g. /dev/stdout
     except OSError:
         existing = None
+    if existing is not None and stat.S_ISDIR(existing.st_mode):
+        raise IsADirectoryError(errno.EISDIR, "is a directory", name)
     if existing is not None and not stat.S_ISREG(existing.st_mode):
-        with open(path, "wb") as fh:
+        # A pipe, terminal, or device (such as os.devnull): write to it directly.
+        with open(name, "wb") as fh:
             yield fh
         return
+    path = os.path.realpath(name)
     directory, base = os.path.split(path)
     try:
         fd, tmp = tempfile.mkstemp(prefix=f".{base}.", suffix=".part", dir=directory)
@@ -56,17 +68,33 @@ def atomic_output(target: PathLike, access: Access = "normal") -> Iterator[Binar
         reason = "the folder does not exist" if isinstance(exc, FileNotFoundError) else exc.strerror
         raise OSError(exc.errno, reason, name) from None
     try:
-        if access != "normal":
-            restrict_to_owner(tmp)  # Windows; mkstemp already gives 0600 on POSIX
-        with os.fdopen(fd, "wb") as fh:
+        fh = os.fdopen(fd, "wb")
+    except BaseException:
+        os.close(fd)
+        _remove(tmp)
+        raise
+    try:
+        with fh:
+            if access != "normal":
+                _restrict(tmp)
             yield fh
         if sys.platform != "win32":
             os.chmod(tmp, _mode(access, existing))
         _replace(tmp, path, name)
     except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
+        _remove(tmp)
         raise
+
+
+def _restrict(tmp: str) -> None:
+    """Owner-only ACL on Windows; file systems without ACLs (FAT, some shares) keep theirs."""
+    with contextlib.suppress(OSError):
+        restrict_to_owner(tmp)
+
+
+def _remove(tmp: str) -> None:
+    with contextlib.suppress(OSError):
+        os.unlink(tmp)
 
 
 def _mode(access: Access, existing: Optional[os.stat_result]) -> int:
@@ -76,9 +104,7 @@ def _mode(access: Access, existing: Optional[os.stat_result]) -> int:
         return stat.S_IMODE(existing.st_mode)
     if access == "private":
         return 0o600
-    umask = os.umask(0)
-    os.umask(umask)
-    return 0o666 & ~umask  # like a normally created file
+    return 0o666 & ~_UMASK  # like a normally created file
 
 
 def _replace(tmp: str, path: str, name: str) -> None:

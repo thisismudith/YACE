@@ -119,3 +119,10 @@ def test_help_for_every_command(capsys):
             main(argv)
         assert info.value.code == 0
         assert "usage:" in capsys.readouterr().out
+
+
+def test_a_token_file_with_a_bom_but_invalid_text(run, tmp_path):
+    bad = tmp_path / "t.txt"
+    bad.write_bytes(bytes([0xFF, 0xFE, 0xFD]))
+    code, _, err = run("encrypt", "--token-file", bad, "--text", "x")
+    assert code == 1 and str(bad) in err and "byte order mark" in err

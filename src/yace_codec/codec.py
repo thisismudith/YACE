@@ -407,7 +407,9 @@ class Codec:
         """
         _check_encryption_options(aad, algorithm, output, chunk_size)
         secrets_ = self._encryption_secret(key, token, password)
-        with _opened(src) as reader, _written(dst, "normal") as writer:
+        # The output is entered first and replaced last, after the input is closed,
+        # so src and dst may be the same path (Windows cannot replace an open file).
+        with _written(dst, "normal") as writer, _opened(src) as reader:
             return sealed.seal_stream(
                 reader, writer, text=text, aad=aad, algorithm=algorithm, output=output,
                 chunk_size=chunk_size, **secrets_,
@@ -433,7 +435,7 @@ class Codec:
         replaces ``dst`` (readable only by you, if it is new) on success.
         """
         secrets_ = self._decryption_secrets(token, password, keys)
-        with _opened(src) as reader, _written(dst, "private") as writer:
+        with _written(dst, "private") as writer, _opened(src) as reader:
             return sealed.unseal_stream(reader, writer, aad=aad, max_age=max_age, **secrets_)
 
     def _encryption_secret(

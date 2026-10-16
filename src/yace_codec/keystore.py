@@ -674,11 +674,20 @@ def _write_json(path: Path, data: Mapping[str, Any]) -> None:
     except OSError as exc:
         raise KeyStoreError(f"cannot write key store '{path}': {exc}") from exc
     try:
+        fh = os.fdopen(fd, "wb")
+    except BaseException:
+        os.close(fd)
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+    try:
         # The copy holds keys: only its owner may read it, from the first byte.
         # Replacing an existing store keeps that store's own permissions (see
-        # _swap_in); a new store stays owner-only.
-        restrict_to_owner(tmp)
-        with os.fdopen(fd, "wb") as fh:
+        # _swap_in); a new store stays owner-only. File systems without ACLs
+        # (FAT, some network shares) cannot do this, and keep their behaviour.
+        with contextlib.suppress(OSError):
+            restrict_to_owner(tmp)
+        with fh:
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())

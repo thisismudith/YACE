@@ -626,17 +626,22 @@ def _prompt(text: str) -> str:
 def _can_prompt() -> bool:
     """Whether getpass can ask someone (it would wait forever without a terminal)."""
     if sys.platform == "win32":
-        # isatty() is also true for NUL; only a console has a console mode.
+        # getpass reads the console (CONIN$), even when stdin is piped. A console
+        # has a console mode; NUL (which isatty() accepts) and pipes do not.
         import ctypes
         import msvcrt
         from ctypes import wintypes
 
-        try:
-            handle = msvcrt.get_osfhandle(sys.stdin.fileno())
-        except (AttributeError, OSError, ValueError):
+        kernel32 = ctypes.WinDLL("kernel32")
+        if not kernel32.GetConsoleWindow():
             return False
-        mode = wintypes.DWORD()
-        return bool(ctypes.WinDLL("kernel32").GetConsoleMode(wintypes.HANDLE(handle), ctypes.byref(mode)))
+        try:
+            with open("CONIN$", "rb", buffering=0) as console:
+                handle = msvcrt.get_osfhandle(console.fileno())
+                mode = wintypes.DWORD()
+                return bool(kernel32.GetConsoleMode(wintypes.HANDLE(handle), ctypes.byref(mode)))
+        except OSError:
+            return False
     try:
         with open("/dev/tty"):
             return True
@@ -650,7 +655,12 @@ def _token_from(data: bytes, source: str) -> Union[str, bytes]:
     encoding = bom_encoding(data)
     token: Union[str, bytes]
     if encoding is not None:
-        token = data.decode(encoding).lstrip(BOM)
+        try:
+            token = data.decode(encoding).lstrip(BOM)
+        except UnicodeDecodeError:
+            raise EncodingError(
+                f"{source} starts with a byte order mark but is not valid {encoding.upper()} text"
+            ) from None
     else:
         try:
             token = data.decode("utf-8")  # the same bytes the prompt would give

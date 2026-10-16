@@ -504,9 +504,14 @@ def _decrypt(
         if raw is None:
             raw = head + reader.read_all(limit=legacy_limit)
         if len(raw) >= SALT_SIZE + 18 + _LEGACY_TAG_SIZE:
-            data, is_text = _open_legacy_frame("", raw, candidates, max_age, now)
-            _write_all(dst, data)
-            return StreamInfo(len(data), is_text)
+            try:
+                data, is_text = _open_legacy_frame("", raw, candidates, max_age, now)
+            except DecryptionError:
+                if not unavailable:
+                    raise
+            else:
+                _write_all(dst, data)
+                return StreamInfo(len(data), is_text)
     if unavailable:
         raise unavailable[0]
     raise DecryptionError(_CANNOT_OPEN)

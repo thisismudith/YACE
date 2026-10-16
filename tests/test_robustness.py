@@ -2,6 +2,8 @@
 
 import array
 import io
+import os
+import sys
 
 import pytest
 
@@ -212,3 +214,51 @@ def test_decode_rejects_impossibly_long_tokens(codec, monkeypatch):
     monkeypatch.setattr(codec_module, "_MAX_TOKEN_CHARS", 1000)
     with pytest.raises(yace.DecodingError, match="longer than any token"):
         codec.decode("default-2:3\n" + "ab" * 600)
+
+
+# --- final review regressions ---------------------------------------------------------------
+
+
+def test_streams_can_rewrite_a_file_in_place(tmp_path):
+    path = tmp_path / "same.bin"
+    path.write_bytes(b"in place")
+    key = yace.generate_key()
+    yace.encrypt_stream(path, path, key=key, output="bytes")
+    assert path.read_bytes() != b"in place"
+    yace.decrypt_stream(path, path, keys=[key])
+    assert path.read_bytes() == b"in place"
+
+
+@pytest.mark.parametrize("size", [1, 40, 5000])
+def test_a_missing_algorithm_is_named_at_any_size(monkeypatch, size):
+    message = yace.encrypt(b"y" * size, key=KEY, algorithm="chacha20-poly1305", output="bytes")
+    stream = io.BytesIO()
+    yace.encrypt_stream(io.BytesIO(b"y" * size), stream, key=KEY, output="bytes", algorithm="chacha20-poly1305")
+    algorithm = type(sealed._algorithms.by_name("chacha20-poly1305"))
+    monkeypatch.setattr(algorithm, "available", property(lambda self: False))
+    for blob in (message, stream.getvalue()):
+        with pytest.raises(yace.DecryptionError, match="cryptography"):
+            yace.decrypt(blob, keys=[KEY])
+
+
+def test_output_files_survive_file_systems_without_acls(tmp_path, monkeypatch):
+    from yace_codec import _files, keystore
+
+    def no_acls(path):
+        raise OSError("not supported")
+
+    monkeypatch.setattr(_files, "restrict_to_owner", no_acls)
+    monkeypatch.setattr(keystore, "restrict_to_owner", no_acls)
+    out = tmp_path / "out.bin"
+    yace.decrypt_stream(io.BytesIO(yace.encrypt(b"x", key=KEY, output="bytes")), out, keys=[KEY])
+    assert out.read_bytes() == b"x"
+    yace.KeyStore(tmp_path / "keys.json").ensure_key("team")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["keys.json", "keys.json.lock", "out.bin"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symbolic links to devices")
+def test_output_to_a_link_to_a_device(tmp_path):
+    link = tmp_path / "null"
+    link.symlink_to(os.devnull)
+    yace.encrypt_stream(io.BytesIO(b"x"), link, key=KEY)
+    assert link.is_symlink()
