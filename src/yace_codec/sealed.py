@@ -99,6 +99,7 @@ _LEGACY_TAG_SIZE = 32
 
 _ALPHABET = string.digits + string.ascii_uppercase + string.ascii_lowercase
 _DIGIT = {ch: i for i, ch in enumerate(_ALPHABET)}
+_PAIRS = [a + b for a in _ALPHABET for b in _ALPHABET]  # speeds up encoding
 # Characters needed for a final block of 1-8 bytes (62**chars >= 256**bytes).
 _CHARS_FOR = {1: 2, 2: 3, 3: 5, 4: 6, 5: 7, 6: 9, 7: 10, 8: 11}
 _BYTES_FOR = {chars: size for size, chars in _CHARS_FOR.items()}
@@ -590,15 +591,26 @@ def padme(length: int) -> int:
 
 def yace62_encode(data: bytes) -> str:
     """Write bytes as letters and digits: every 8 bytes become 11 characters."""
-    out = []
-    for start in range(0, len(data), 8):
-        block = data[start : start + 8]
+    out: List[str] = []
+    append = out.append
+    full = len(data) - len(data) % 8
+    for start in range(0, full, 8):
+        # 62**11 > 2**64: one leading digit, then five two-character pairs.
+        value = int.from_bytes(data[start : start + 8], "big")
+        value, p5 = divmod(value, 3844)
+        value, p4 = divmod(value, 3844)
+        value, p3 = divmod(value, 3844)
+        value, p2 = divmod(value, 3844)
+        value, p1 = divmod(value, 3844)
+        append(_ALPHABET[value] + _PAIRS[p1] + _PAIRS[p2] + _PAIRS[p3] + _PAIRS[p4] + _PAIRS[p5])
+    if full < len(data):
+        block = data[full:]
         value = int.from_bytes(block, "big")
         digits = []
         for _ in range(_CHARS_FOR[len(block)]):
             value, digit = divmod(value, 62)
             digits.append(_ALPHABET[digit])
-        out.append("".join(reversed(digits)))
+        append("".join(reversed(digits)))
     return "".join(out)
 
 
