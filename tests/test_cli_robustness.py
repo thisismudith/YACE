@@ -1,44 +1,11 @@
 """Command line: usage errors, odd inputs and outputs, and helpful messages."""
 
-import io
-import json
 import os
 import sys
 
 import pytest
 
-import yace_codec as yace
-from yace_codec import sealed
 from yace_codec.cli import main
-
-
-@pytest.fixture(autouse=True)
-def fast_scrypt_and_clean_env(monkeypatch):
-    monkeypatch.setattr(sealed, "SCRYPT_N", 2**10)
-    monkeypatch.delenv("YACE_CODEC_TOKEN", raising=False)
-    monkeypatch.delenv("YACE_CODEC_PASSWORD", raising=False)
-
-
-@pytest.fixture
-def run(capsysbinary, monkeypatch):
-    def runner(*argv, stdin=b""):
-        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(stdin)))
-        code = main([str(arg) for arg in argv])
-        out, err = capsysbinary.readouterr()
-        return code, out, err.decode("utf-8", "replace")
-
-    return runner
-
-
-@pytest.fixture
-def usage(run, capsysbinary):
-    def runner(*argv, stdin=b""):
-        with pytest.raises(SystemExit) as info:
-            run(*argv, stdin=stdin)
-        err = capsysbinary.readouterr().err.decode("utf-8", "replace")
-        return info.value.code, err
-
-    return runner
 
 
 @pytest.mark.parametrize(

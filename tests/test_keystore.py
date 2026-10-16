@@ -362,3 +362,50 @@ def test_lock_file_follows_key_store_permissions(file_store):
     os.chmod(lock, 0o600)
     file_store.ensure_tables("second", 2, 1)
     assert stat.S_IMODE(lock.stat().st_mode) == 0o660
+
+
+# --- secret keys in the key store --------------------------------------------------------
+
+
+def test_keys_persist_and_stay_out_of_tables(tmp_path):
+    path = tmp_path / "keystore.json"
+    codec = yace.Codec(path)
+    token = codec.encrypt("persisted", "vault")
+    codec.encode("x", "fam", length=2, iterations=1)
+    reopened = yace.KeyStore(path)
+    assert reopened.key_names() == ["vault"]
+    assert reopened.table_names() == ["fam-2:1"] and len(reopened) == 1
+    assert [f.name for f in reopened.families()] == ["fam"]
+    assert yace.Codec(reopened).decrypt(token) == "persisted"
+    assert reopened.ensure_key("vault") == reopened.get_key("vault")
+
+
+def test_export_and_import_keys(codec):
+    token = codec.encrypt("shared", "team")
+    exported = json.loads(json.dumps(codec.keystore.export_key("team")))
+    other = yace.KeyStore.in_memory()
+    assert other.import_keys(exported, name="team").added == ("key:team",)
+    assert yace.Codec(other).decrypt(token) == "shared"
+    assert other.import_keys(exported).unchanged == ("key:team",)
+    other.ensure_key("default")
+    clash = {"key:default": {"secret": "A" * 43 + "="}}
+    with pytest.raises(yace.KeyStoreError, match="already exist"):
+        other.import_keys(clash)
+    with pytest.raises(yace.KeyStoreError, match="no key named"):
+        other.import_keys(exported, name="ghost")
+
+
+@pytest.mark.parametrize(
+    "data",
+    [{"key:x": {"secret": "short"}}, {"key:x": "nope"}, {"key:bad-name": {"secret": "A" * 43 + "="}},
+     {"notakey": {"secret": "A" * 43 + "="}}],
+)
+def test_invalid_key_imports(data):
+    with pytest.raises(yace.KeyStoreError):
+        yace.KeyStore.in_memory().import_keys(data)
+
+
+def test_tables_import_refuses_keys(codec):
+    codec.encrypt("x", "k")
+    with pytest.raises(yace.KeyStoreError, match="import_keys"):
+        yace.KeyStore.in_memory().import_tables(codec.keystore.export_key("k"))

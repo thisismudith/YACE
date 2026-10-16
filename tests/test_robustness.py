@@ -11,11 +11,6 @@ from yace_codec import sealed
 KEY = bytes(range(32))
 
 
-@pytest.fixture(autouse=True)
-def fast_scrypt(monkeypatch):
-    monkeypatch.setattr(sealed, "SCRYPT_N", 2**10)
-
-
 # --- the header check value ---------------------------------------------------------------
 
 

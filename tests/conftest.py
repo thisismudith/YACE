@@ -1,11 +1,24 @@
+"""Shared fixtures. Every test runs isolated from the user's real key store and keyring."""
+
+import io
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
+from hypothesis import settings
 
 import yace_codec as yace
+from yace_codec import sealed
+from yace_codec.cli import main
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+# Deterministic property tests in CI (CI=true), so a failure can be reproduced.
+settings.register_profile("ci", derandomize=True, deadline=None, print_blob=True)
+if os.environ.get("CI"):
+    settings.load_profile("ci")
 
 
 @pytest.fixture(autouse=True)
@@ -14,6 +27,17 @@ def default_keystore(tmp_path, monkeypatch):
     path = tmp_path / "default" / "keystore.json"
     monkeypatch.setenv(yace.ENV_VAR, str(path))
     return path
+
+
+@pytest.fixture(autouse=True)
+def isolated_secrets(request, monkeypatch):
+    """Cheap scrypt, no secret tokens from the environment, and no real keyring."""
+    if request.node.get_closest_marker("real_scrypt") is None:
+        monkeypatch.setattr(sealed, "SCRYPT_N", 2**10)
+    monkeypatch.delenv("YACE_CODEC_TOKEN", raising=False)
+    monkeypatch.delenv("YACE_CODEC_PASSWORD", raising=False)
+    # A stray call to the system keyring fails instead of touching it.
+    monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
 
 
 @pytest.fixture
@@ -29,6 +53,32 @@ def codec(store):
 @pytest.fixture
 def file_store(tmp_path):
     return yace.KeyStore(tmp_path / "store" / "keystore.json")
+
+
+@pytest.fixture
+def run(capsysbinary, monkeypatch):
+    """Run the CLI in-process; return (exit code, stdout bytes, stderr text)."""
+
+    def runner(*argv, stdin=b""):
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(stdin)))
+        code = main([str(arg) for arg in argv])
+        out, err = capsysbinary.readouterr()
+        return code, out, err.decode("utf-8", "replace")
+
+    return runner
+
+
+@pytest.fixture
+def usage(run, capsysbinary):
+    """Run the CLI expecting a usage error; return (exit code, stderr text)."""
+
+    def runner(*argv, stdin=b""):
+        with pytest.raises(SystemExit) as info:
+            run(*argv, stdin=stdin)
+        err = capsysbinary.readouterr().err.decode("utf-8", "replace")
+        return info.value.code, err
+
+    return runner
 
 
 @pytest.fixture(scope="session")

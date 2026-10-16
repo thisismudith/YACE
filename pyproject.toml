@@ -72,3 +72,7 @@ yace_codec = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+xfail_strict = true
+filterwarnings = ["error"]
+markers = ["real_scrypt: use the real (slow) scrypt cost instead of the cheap test cost"]

@@ -1,37 +1,19 @@
 """Command line: encrypt, decrypt, algorithms, and keys."""
 
 import base64
-import io
 import json
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 import yace_codec as yace
 from yace_codec import sealed
-from yace_codec.cli import main
 
 VECTORS = Path(__file__).parent / "vectors"
-
-
-@pytest.fixture(autouse=True)
-def fast_scrypt_and_clean_env(monkeypatch):
-    monkeypatch.setattr(sealed, "SCRYPT_N", 2**10)
-    monkeypatch.delenv("YACE_CODEC_TOKEN", raising=False)
-    monkeypatch.delenv("YACE_CODEC_PASSWORD", raising=False)
-
-
-@pytest.fixture
-def run(capsysbinary, monkeypatch):
-    def runner(*argv, stdin=b""):
-        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(stdin)))
-        code = main([str(arg) for arg in argv])
-        out, err = capsysbinary.readouterr()
-        return code, out, err.decode("utf-8", "replace")
-
-    return runner
 
 
 def test_algorithms_command(run):
@@ -173,3 +155,116 @@ def test_legacy_tokens_decrypt_from_the_command_line(run, tmp_path):
         assert run("decrypt", "-k", store, "--text", vector["token"])[:2] == (
             0, vector["plaintext"].encode(),
         )
+
+
+# --- secret tokens, keys, and max-age on the command line --------------------------------
+
+
+def test_cli_encrypt_decrypt(run, tmp_path):
+    code, token, _ = run("encrypt", "--text", "cli secret")
+    assert code == 0 and token.strip().isalnum()
+    assert run("decrypt", stdin=token)[:2] == (0, b"cli secret")
+    blob = tmp_path / "blob.bin"
+    blob.write_bytes(os.urandom(777))
+    code, token, _ = run("encrypt", str(blob), "--key", "files")
+    assert run("decrypt", stdin=token)[:2] == (0, blob.read_bytes())
+
+
+def test_cli_token(run, monkeypatch):
+    monkeypatch.delenv("YACE_CODEC_PASSWORD", raising=False)
+    monkeypatch.setenv("YACE_CODEC_TOKEN", "s3cret")
+    code, token, err = run("encrypt", "--token", "--text", "via env")
+    assert code == 0 and "deprecated" in err and "YACE_CODEC_TOKEN" in err
+    assert run("decrypt", "--token", stdin=token)[:2] == (0, b"via env")
+    monkeypatch.delenv("YACE_CODEC_TOKEN")
+    monkeypatch.setenv("YACE_CODEC_PASSWORD", "s3cret")  # 0.2.0 name
+    assert run("decrypt", "--password", stdin=token)[:2] == (0, b"via env")
+    monkeypatch.setenv("YACE_CODEC_PASSWORD", "wrong")
+    code, _, err = run("decrypt", "-p", stdin=token)
+    assert code == 1 and "cannot be opened" in err
+
+
+def test_cli_password_prompt(run, monkeypatch):
+    monkeypatch.delenv("YACE_CODEC_PASSWORD", raising=False)
+    monkeypatch.delenv("YACE_CODEC_TOKEN", raising=False)
+    answers = iter(["typed", "typed", "typed"])
+    monkeypatch.setattr("getpass.getpass", lambda prompt="": next(answers))
+    monkeypatch.setattr("yace_codec.cli._can_prompt", lambda: True)
+    code, token, _ = run("encrypt", "-p", "--text", "prompted")
+    assert code == 0 and run("decrypt", "-p", stdin=token)[:2] == (0, b"prompted")
+    answers = iter(["one", "two"])
+    code, _, err = run("encrypt", "-p", "--text", "x")
+    assert code == 1 and "do not match" in err
+
+
+def test_cli_keys(run, tmp_path):
+    run("encrypt", "--text", "x", "--key", "team")
+    code, out, _ = run("keys", "list")
+    assert out.decode().split() == ["team"]
+    exported = tmp_path / "team.json"
+    assert run("keys", "export", "team", "-o", str(exported))[0] == 0
+    other = tmp_path / "other.json"
+    code, _, err = run("keys", "import", str(exported), "-k", str(other))
+    assert code == 1 and "--name NAME" in err
+    code, _, err = run("keys", "import", str(exported), "--name", "team", "-k", str(other))
+    assert code == 0 and "added: team" in err
+    if os.name != "nt":
+        assert oct(exported.stat().st_mode & 0o777) == "0o600"
+
+
+def test_cli_max_age(run, tmp_path):
+    code, token, _ = run("encrypt", "--text", "fresh")
+    assert run("decrypt", "--max-age", "60", stdin=token)[:2] == (0, b"fresh")
+    old = sealed.seal(
+        b"stale", text=True, key=yace.KeyStore.default().get_key("default"), now=time.time() - 100
+    )
+    code, _, err = run("decrypt", "--max-age", "10", stdin=old.encode())
+    assert code == 1 and "seconds ago" in err
+    with pytest.raises(SystemExit) as exit_info:
+        run("decrypt", "--max-age", "-1", stdin=token)
+    assert exit_info.value.code == 2
+
+
+# --- file permissions of outputs ---------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_decrypted_files_are_private_on_posix(run, tmp_path):
+    (tmp_path / "plain.txt").write_text("secret")
+    assert run("encrypt", tmp_path / "plain.txt", "-o", tmp_path / "enc.txt")[0] == 0
+    assert run("decrypt", tmp_path / "enc.txt", "-o", tmp_path / "dec.txt")[0] == 0
+    assert oct(os.stat(tmp_path / "dec.txt").st_mode & 0o777) == "0o600"
+    os.chmod(tmp_path / "dec.txt", 0o640)  # an existing file keeps its mode
+    assert run("decrypt", tmp_path / "enc.txt", "-o", tmp_path / "dec.txt")[0] == 0
+    assert oct(os.stat(tmp_path / "dec.txt").st_mode & 0o777) == "0o640"
+    umask = os.umask(0)
+    os.umask(umask)
+    assert os.stat(tmp_path / "enc.txt").st_mode & 0o777 == 0o666 & ~umask
+
+
+def owner_only(path) -> bool:
+    acl = subprocess.run(["icacls", str(path)], capture_output=True, text=True, check=True).stdout
+    entries = [line for line in acl.splitlines()[:-1] if ":" in line]
+    return "(I)" not in acl and len(entries) == 2
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ACLs")
+def test_exported_keys_and_decrypted_files_are_private_on_windows(run, tmp_path):
+    run("encrypt", "--text", "x", "--key", "team")
+    assert run("keys", "export", "team", "-o", tmp_path / "team.json")[0] == 0
+    assert owner_only(tmp_path / "team.json")
+    code, token, _ = run("encrypt", "--text", "secret")
+    (tmp_path / "enc.txt").write_bytes(token)
+    assert run("decrypt", tmp_path / "enc.txt", "-o", tmp_path / "dec.txt")[0] == 0
+    assert owner_only(tmp_path / "dec.txt")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_exported_keys_are_private_on_posix(run, tmp_path):
+    run("encrypt", "--text", "x", "--key", "team")
+    target = tmp_path / "team.json"
+    target.write_text("old")
+    os.chmod(target, 0o644)
+    assert run("keys", "export", "team", "-o", target)[0] == 0
+    assert oct(os.stat(target).st_mode & 0o777) == "0o600"
+    assert "key:team" in json.loads(target.read_text())

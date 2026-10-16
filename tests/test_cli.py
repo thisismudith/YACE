@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import shutil
@@ -9,20 +8,6 @@ import sys
 import pytest
 
 import yace_codec as yace
-from yace_codec.cli import main
-
-
-@pytest.fixture
-def run(capsysbinary, monkeypatch):
-    """Run the CLI in-process; return (exit code, stdout bytes, stderr text)."""
-
-    def runner(*argv, stdin=b""):
-        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(stdin)))
-        code = main(list(argv))
-        out, err = capsysbinary.readouterr()
-        return code, out, err.decode("utf-8", "replace")
-
-    return runner
 
 
 def test_encode_and_decode_text(run, tmp_path):
@@ -176,7 +161,6 @@ def test_console_script(tmp_path):
     assert subprocess.run(
         [exe, "decode"], input=out.stdout, capture_output=True, env=env, check=True
     ).stdout == b"script"
-
 
 
 # --- review regressions -------------------------------------------------------

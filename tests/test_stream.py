@@ -17,11 +17,6 @@ TAGS = {"aes-256-gcm": 16, "chacha20-poly1305": 16, "yace-hmac-sha256": 16}
 HEADER = 16 + 3 + 4
 
 
-@pytest.fixture(autouse=True)
-def fast_scrypt(monkeypatch):
-    monkeypatch.setattr(sealed, "SCRYPT_N", 2**10)
-
-
 class Trickle(io.RawIOBase):
     """A source that returns at most ``step`` bytes per read, like a pipe."""
 
@@ -286,3 +281,38 @@ def test_decryption_memory_stays_constant(tmp_path):
 def test_round_trip_property(data, chunk_size, algorithm, output, aad):
     token = encrypt(data, chunk_size=chunk_size, algorithm=algorithm, output=output, aad=aad)
     assert decrypt(token, aad=aad) == data
+
+
+# --- wrong keys, messages, and text in streams -------------------------------------------
+
+
+def test_wrong_key_or_aad_fails_fast_on_streams(tmp_path):
+    path = tmp_path / "big.yace"
+    with open(path, "wb") as fh:
+        yace.encrypt_stream(io.BytesIO(bytes(8 * 1024 * 1024)), fh, key=KEY, aad=b"a", output="bytes")
+    for kwargs in ({"keys": [bytes(32)], "aad": b"a"}, {"keys": [KEY], "aad": b"b"}):
+        tracemalloc.start()
+        with open(path, "rb") as fh, pytest.raises(yace.DecryptionError):
+            yace.decrypt_stream(fh, io.BytesIO(), **kwargs)
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        assert peak < 2 * 1024 * 1024, (kwargs, peak)
+
+
+def test_messages_still_decrypt_through_decrypt_stream():
+    for output in ("text", "bytes"):
+        token = yace.encrypt(b"m" * 100_000, key=KEY, output=output)
+        blob = token.encode() if isinstance(token, str) else token
+        back = io.BytesIO()
+        yace.decrypt_stream(io.BytesIO(blob), back, keys=[KEY])
+        assert back.getvalue() == b"m" * 100_000
+
+
+def test_text_streams_must_be_utf8():
+    with pytest.raises(yace.EncodingError, match="UTF-8"):
+        yace.encrypt_stream(io.BytesIO(b"ok \xff\xfe\x80"), io.BytesIO(), key=KEY, text=True)
+    with pytest.raises(yace.EncodingError, match="UTF-8"):
+        yace.encrypt_stream(io.BytesIO(b"cut \xe0\xa4"), io.BytesIO(), key=KEY, text=True)
+    out = io.BytesIO()
+    yace.encrypt_stream(io.BytesIO("नमस्ते".encode() * 1000), out, key=KEY, text=True, chunk_size=64)
+    assert yace.decrypt(out.getvalue(), keys=[KEY]) == "नमस्ते" * 1000

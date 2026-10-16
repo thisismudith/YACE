@@ -8,6 +8,9 @@ import pytest
 
 from yace_codec import _algorithms, sealed
 
+# Secret-token vectors use the real scrypt cost that the format defines.
+pytestmark = pytest.mark.real_scrypt
+
 VECTORS = json.loads((Path(__file__).parent / "vectors" / "v3.json").read_text(encoding="utf-8"))["vectors"]
 
 

@@ -12,11 +12,6 @@ KEY = bytes(range(32))
 ALGORITHMS = ["aes-256-gcm", "chacha20-poly1305", "yace-hmac-sha256"]
 
 
-@pytest.fixture(autouse=True)
-def fast_scrypt(monkeypatch):
-    monkeypatch.setattr(sealed, "SCRYPT_N", 2**10)
-
-
 @pytest.mark.parametrize("algorithm", ALGORITHMS)
 def test_matching_aad_decrypts(algorithm):
     token = sealed.seal(b"salary: 1", text=False, key=KEY, aad=b"row:1", algorithm=algorithm)

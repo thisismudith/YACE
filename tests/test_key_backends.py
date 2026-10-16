@@ -12,8 +12,6 @@ import pytest
 import yace_codec as yace
 from yace_codec import keybackends
 
-pytest.importorskip("keyring")
-
 WINDOWS = sys.platform == "win32"
 
 
@@ -37,7 +35,9 @@ BACKENDS = [
 
 
 @pytest.fixture(params=BACKENDS)
-def make_backend(request, tmp_path, memory_keyring):
+def make_backend(request, tmp_path):
+    if request.param is keyring_backend:
+        request.getfixturevalue("memory_keyring")  # skips if keyring is not installed
     return lambda: request.param(tmp_path)
 
 
@@ -176,3 +176,44 @@ def test_keyring_index_survives_reopen(memory_keyring):
 
 def test_keybackends_module_exports():
     assert keybackends.KeyBackend is yace.KeyBackend
+
+
+# --- keyring limits and failures ---------------------------------------------------------
+
+
+def test_keyring_survives_many_rotations(memory_keyring):
+    store = yace.KeyringKeyStore(service="rot")
+    keys = [store.ensure_key("team")] + [store.rotate_key("team") for _ in range(60)]
+    assert max(len(value) for value in memory_keyring.data.values()) < 200
+    assert store.get_key("team") == keys[-1]
+    assert sorted(store.decryption_keys()) == sorted(keys)
+    exported = store.export_key("team")["key:team"]
+    assert len(exported["retired"]) == 60 and exported["retired"][0] != exported["secret"]
+    store.delete_key("team")
+    assert memory_keyring.data == {("rot", "__yace_codec_key_names__:0"): "[]"}
+
+
+def test_keyring_backend_errors_become_key_store_errors(memory_keyring, monkeypatch):
+    store = yace.KeyringKeyStore(service="err")
+
+    def fail(*args):
+        raise RuntimeError("credential too large")
+
+    monkeypatch.setattr(memory_keyring, "set_password", fail)
+    with pytest.raises(yace.KeyStoreError, match="credential too large"):
+        store.ensure_key("team")
+
+
+def test_keyring_unindexed_and_stale_entries(memory_keyring):
+    store = yace.KeyringKeyStore(service="idx")
+    store.ensure_key("team")
+    exported = store.export_key("team")
+    memory_keyring.data[("idx", "__yace_codec_key_names__")] = "[]"  # lost index update
+    other = {"key:team": {"secret": "A" * 43 + "="}}
+    with pytest.raises(yace.KeyStoreError, match="already exist"):
+        store.import_keys(other)
+    assert store.import_keys(exported).unchanged == ("key:team",)
+    assert store.key_names() == ["team"]  # the import repaired the index
+    memory_keyring.data.pop(("idx", "key:team"))  # stale index entry
+    store.delete_key("team")
+    assert store.key_names() == []
