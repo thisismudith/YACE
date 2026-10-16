@@ -1,0 +1,350 @@
+{
+ "about": "Tokens produced by the original YACE scripts (encoder/encoder.py at commit 01d44a2) with seeded randomness and the tables in legacy_keystore.json. The clash-3:* tables reproduce a defect of the original generator (a bin code equal to a space code). original_decoder_ok records whether the original decoder/decoder.py returned the text. The 'big fun' family has a space in its name, which the original scripts allowed.",
+ "vectors": [
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "legacy-3:2\nOEgwamA8VXUYfSoO3SXUYvF9tXBubnvF9WqaWzPi9jwYnr9ffgtqe6oU7XUifSoBUiaHkrf5J8vUoKYoEwYnoU7zIr085xhEUoKfSooU7WFMBUiDeKNwUYoEvLCDeKfSoubnfSoBUi085Ni8GOoXqdr9f1HRhoAwNQZbwoU7LJWxhEV5vNwUYoEYoEV5vwYn085UETzIrwYnJ8vNwUWzPrf5WzPJ8vwYnJ8vfgtr9fZbwUCQrmwBUiWqawYnzIrNQ5A8VNQ5uN72Xy0PGcw5kpFNQ5J8vlwKWqaxhEXKgvF9uN71HRqe62XyDeKYoENwUi9jsyZWx6NZJLJWuN70H5WzP1HRDeKYoEV5voU7XKgO3SoU7XKg1KGcw5DeKcw5xefwYn6v909s",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "legacy-3:2\nOEgwam6v9aBjwYncw5xefcw52XyXUYoU7tXBubnoU7WzPaBjDeKV5vr9ftXB1HRqe6aHkuN7fSoxtrJ8vNwUNZqwYnzIrqe6bKduN7bKdBUi0PGoU7A8V0PGBD3YoEcw5ubnfSouN7WzPBUioU7Xqd1HR1HRsyZUCQrmwJ8vtVQi9jWzPJ8vNwUJ8vWzPV5vUuToU7cw5wYn1HRxtrYoENwUYoEuN7V5vwYnwNQoU7ZbwUuThoABUicw5xhE0H5fSofgtNQ5DeKvLCNQ5NwUDeKlwKJ8vXKgvF9fSo1HR1KG085Wqa5iXYoEoU7DeKBUiYoEi9joU7NZJLJWwYn9XkNi8glSYoEi9jO3SXKgvF9xefXKgvF9O3SDeKfSoXUYrmw1KGglS09s",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "legacy-3:2\nOEgglSXUYcw5fSoXUYtXBvF9r9fO3SoU7V5vwYnoU7qe6NZqBD3uN7XUiUETfSoBUiPv3NwUYoEUoKNi8GOoLJWfSoBUixhENwUYoEDeKUoKUoK5iX0PGUETXKguN7fSoxhEwam9XkvLCEsf1HRNQ5wNQ0PGxhEWzPfgtBUiNwUBD3oU7WzPV5vV5vNQ5Ni8YoEJ8vNwUGOoUuTWzPwYnwYnJ8vYoEZbwhoAJ8vXqdwam0H59XkEsfUCQubnBD3XUiNQ5DeKBUilwKoU7fSovF91HRDeKqe6oU7cw5YoEi9jJ8vaHkNZJuN7fgt1KGNQ5nOYp3EJ8vDeKYoEUuTXUiglSoU7i9jNZq1HRXKgvF9WzPXKgUoKubncw5DeKO3SwYnwam6v909s",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "legacy-3:2\n2XyXqdvF9fgtZbw0H5UCQWqaOEgUCQcw51HRwNQp3Ei9jp3ExqfNZqaHkDeKEsfAOb6v9bKdwFhV5vBD3aBjsyZxqfhoAXKgXKgkpFubnUoKwamNQ5i8LnOYA8VwNQzIrqe66v9oU7i9jcw51HRDeK1HRubnNi8tVQUETubnXqd8zEGOoUCQtVQZbwuN7nOYXqdV5v5iXDeKrmwNZJi9j9XktVQ9XkUuTxefwFhrf5Xqd6v9xqfEsf60gA8VxtruN70H5WzPYoEfgtubnLJWUCQV5vi9jfSoglSaBjzBEubnxefJ8vnczrmw09sXKgDeKfgtLJWqe6hZd9XkLJWwam1KGBUiBD3hoAZbwXqdO3SsyZnOY09sDeKXUYcw59XkXUYDeKvF9i9jNQ5wNQlwKtVQhoAuN7zBEcw5NZJnczxefxefvF9i9j1HRUCQDeKoU7XKgYoEtXBaBjO3SNi8cw56v9XUifSoYoEJ8voU7BUiuN7fSoOEgZbwfgtwYnUET1HRNZJoU7cw5ZbwfSo1KGi8LwNQBUiZbwfSoWx6NwUDeKYoEhoAZbwfgtJ8vJ8vNwUUETi9jubntXBi9jfYWqe6uN7NZqAOb09sHJmWqaBUiwamXqdWx6EsfLJWwYn0H5aHkYoEi9j8zEwFhUoKi9jNQ5Ni8nOYUuTtXBUETO3Sxef9XkvLCzBEnczYoEsyZUuT1HR0PGtXBoU78zE9Xk1HRV5vp3ENi8GOoWqaXUY8zEUETaHkaBjqe6wFhWzPnOYwYnuN7NZq09s2Xy6v960gWx6rf51KG0H5XUiWzPfgtDeKDeKfSo2XyJ8voU7r9fhoABUihoAJ8v",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "legacy-3:2\nXqdBUihoAvF9Zbw0H5UCQoU75iXOEgNZqDeK1HRcw5i9jaHkA8V6v92XyxqfAOb5iX09snOYqe6uN7hoAXKgUETwami8LWzP1KG9XkXKgWx6zIrXUY6v9oU79Xk1HRncz1HRubnbKdqe6tVQXqdkpFnOYUCQzBEfgtWFMO3SBD3bKduN7nOY8zEZbwaHkNZJi9j9XkkpF0H5XqdXqdi9jxqf1KG9Xkqe6tXBwFhWqanOY09subnJ8v60gWqaxefuN7V5vhoAYoENwUp3EbKdubnZbwfgtnczi8LDeKUoKXKgwNQoU7cw5cw5NZJ5iX1HR9XkrmwNQ5wam5iXkpF1KGhoAsyZXqdO3SoU7nOY09sDeKXUYrf5xqfcw5rf5XKgXUYDeKUCQYoEUoKvF9NQ5DeKbKdoU7xtrNZJ1HRzBEcw5UuTnczlwKcw5r9fi9jhoA1HRglSwNQoU7O3SvF9wamrf5vLCcw56v9fSoJ8vYoEZbwuN7BUifSoUoKOEgBUikpFwYnNi8GOohZdqe6oU71HRDeKfSop3EBUifSo09sYoEi9jJ8vnOYPv3zBEJ8vNwUfSoi9jubnA8Vi9jfYWUCQuN76v9Pv3bKdHJmfgtBUitXBEsfUETNi8AObrf5wYntVQDeKYoELJWXqdwFhV5vtVQi9jxhEtXBubnLJWNi8vLCZbwDeKYoE8zEi9j1HR9XkoU78zE1HRV5vtXBcw5Ni8ubntXBNZq8zEwNQaHkwFhnOYV5vxtrbKd5iXwYnxqfNZq6v9wFhDeK60gEsfaBjfgtWx6nOYPv3wNQrmwDeKUCQfSoJ8vkpFWqaWx6fgtbKdhoAUoKJ8v",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "legacy-3:2\nXqdBUivF9rmwZbwfgt0H5J8vUCQOEgcw5DeK1HR9Xki9jaHkUoKEsfWFM09swFhNZqwYnWFMqe6wFhhoAXKg8zEi8LnOYLJW9XkwNQ5iXzIrtXB8zEwam9Xk1HRkpFWx6DeKncz1HRNi89XktVQubn8zEnOYtXBoU7cw5fgtXUirmwwFhnOY8zEXqdV5vaHkDeKLJW9Xki9jXqdXqdXUiAObxqfUoKEsfqe6bKdxefwYnuN7085ubnglSJ8vUCQuN7hoArmwYoENwUp3EJ8vubnZbwr9fA8VnczYoE09sxeffSotXB9XkfSoNZJhZdoU7wYnWx61HRwamOEgNQ5BUiXqdfSoYoEsyZxef09s6v9J8vcw5O3SDeKXUYDeKWqarf5i9joU7DeKlwKXKgzIr085syZNZJUuThoAcw5vF9ncz1HRUCQzBEwNQoU7wYnUETvF9NQ5cw51HRYoENZqcw51KGfSokpFXUYoU7xhEnOYZbwuN7O3S1KGBUihoANi8GOoxefqe6r9f9Xkcw5DeKNi8wNQBUiXKgsyZDeKi8Li9jwamJ8v9XkEsfzBENwU1KGfSoi9jubnV5vi9jBD31KGfYW60gzIr6v909stXBHJmwFhr9fBUifgtrf5nOYPv3tVQwYn0H5NZJYoEi9jp3ExtrWqaxefA8VZbw1HRnOYPv3UCQ5iXUoKXqdO3SWqaubnvLCzBE0PGYoEi9jEsfqe6oU76v91HRV5vBD3ZbwfgtkpFubnXUYwamXKgaHkxqfWzPV5vnOYuN76v9AObDeK60g6v9xqfwamwNQWFMEsfUCQDeKfSokpFoU7bKdsyZsyZhoAhoAJ8v",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "legacy-3:2\nqe6ncz2XynczEsf09szBExqf8zEi9jXUY6v98zELJW085DeKwNQJ8vWFM2txwFhWx6BD3nczJ8vxefUETi8LBD309s1HRi8Lrf5Wqa2txNZJNZqNZqNZqqe66v9vLC1HRfSozBEwNQlwKDeKr9fNZqfgtAOb0H5wNQoU7XUiAObglSuN7Pv3hZdi8LfSoWzPNwUi8LEsf09sNZqxefXUYvF99XkaBjAObfgthZdaHkqe6fSoOEgnOYwYnXUi6v92txWzPNQ5GOoXqdO3Sx9ltVQBUii8LubnwYnlwKx9lJ8vJ8vglS085tXB2tx2txNwUEsftXBrmwfgtaHkWqavLCoU7NQ5ubn9XkvLCoU7WzPcw5kpF9Xkp3Exef8zEfSoO3SWqaNwUYoEV5voU7XKghZdglSvF9A8VYoEi9jOEg1HRV5vGOofYW60gO3SNZJp3ENZqNZJaHkwam",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "legacy-3:2\nqe6nczEsfnczO3SA8V60gxtr8zEV5vXUY6v9i9jOEgLJWDeKwNQUoKoU7WqahZdsyZwFhV5vO3Sncz8zE1HR09s9Xkrf5WzP2txubn9Xk0PGxhE6v9vLCvLCfSozBEUoKlwKDeKEsffgt0852txaBjwNQxefAObwYnx9lPv3BUii8LfSokpFtVQxefNwUxhExefUoKEsfNQ5r9fxef6v9XUY9XknOYAObfgthZdaHkqe6fSoOEgvF9wYn2tx09sWzPA8VUoKGOoXqdi8LWzPx9lO3SxefhZdi8LubnlwKuN7oU7J8vJ8vAObtXB0H5NwUsyZ2txwNQfgttXBWFM1HRaHkqe6WFMoU7NQ5rmwNZJ2XyvLCi8LoU7cw52Xyi8LfSoUoKJ8vNwU2txYoEsyZJ8vXKgvF90855iXYoErmw8zE1HRGOoi9jfYWxqfzBENZJ09sNZJaHkwam",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "legacy-3:2\nqe6nczEsfNZJO3SxqfsyZGOoXUYsyZOEgLJWWx6wNQJ8v1HR2Xy2txi9jV5vnczUoK09s9XkoU7WzP2txA8VNZJ0PGJ8vkpFoU7i8LvLCaHkwYnzBEtXBubnDeKA8Vqe62txBD31HR0850H5EsfaBjJ8vxtrAObxtrAObuN7Pv3Wqai8LNZqubnO3SxhEtVQi8LNQ5Xqd6v9xefWzPXUY5iX9XknOYAObfgthZdaHkqe6fSoOEgvF9wYn2txWFMEsfGOo09sWzPx9lNwUhZdi8LfSolwKx9lBUioU7J8vwYnsyZtXBbKd2txNwUwNQwNQfgtfgt2XyvLCxhExtrNQ5lwKvLCkpFfSozIr0856v9fSoO3S9Xkrf5xhExhENwUYoEi8LXKgvF98zEDeKYoEwFh8zEglShZdV5vi9j085fYW60g6v9zBENZJ8zEnczXUi09ssyZaHkwam",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "a",
+   "token": "legacy-3:2\nUuTUCQwNQ1HR",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "a",
+   "token": "legacy-3:2\nwNQUCQr9f1HR",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "a",
+   "token": "legacy-3:2\nwNQUCQr9f1HR",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "legacy-3:2\nuN7i9jfgtNQ5cw5GOoJ8vXKgYoEcw5DeKfSoXKgUCQwFh1HRsyZwNQxtrp3Ei9jp3EV5vubnuN7ubnNwUYoEO3SxqfvLC085O3SXUYkpFrf5tXBA8VO3Sp3EubnglSBD3lwKwYnoU7A8VvF9WzP9XkwYnWqa2Xy1HRUCQUoK1HRqe6oU7uN7fSowNQBUibKdkpFWFMwamV5vr9fEsfXKgNQ5DeKV5vtXBaBjWzPO3S1HRubnUCQwNQp3EwYnzIrcw50PGcw5wamXUYtXBJ8vO3SWzPxtrwYnrf5A8VNQ5DeKUCQlwK1HRaHkwNQcw5DeKfSooU7NwUvF9oU7Ni81HRtVQWzP0H5",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "legacy-3:2\nPv3nOYPv3wami9jEsfp3ExhENwUYoEfSoNZqUETwNQfSor9flwKxhEXKgwYnwFh1HRWzPrmwwNQtXBubnxefcw5xefJ8vNQ5YoEkpFWx69XkEsfubnO3S0PG0PGUETXUYNi8ubnO3StXBA8VkpFuN7V5vwYn2XyXKgvF9wNQWzPV5vwYn1HRUCQaBj1HRqe6oU71KGoU7WzPfSoBUibKd9Xk2XytXBNQ5DeKNZqlwKtXBcw5O3S1HRwamUCQwNQNwUNi8GOouN7O3SXUYi9jubnO3SUCQxefV5vaHkNQ5DeKp3E1HRUCQDeKcw5DeKcw5oU7XKgJ8vvF9tVQ9XkuN7fgtnOYfgt",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "legacy-3:2\nkpFNi8Pv3oU7LJWWqa1HRZbwNwUYoEoU7bKdDeKcw5XKgaHk0PGwFhUuTDeKbKdrmwwYnwNQi9jO3SuN7syZXUYrmwNwUfgtYoEoU7wNQ1HR2XyUCQO3SXUYaBjtXBubnubnO3SWzPDeKWqawYn085XKgvF9BUiV5vwYnuN7UCQwNQ1HRqe6oU71HR1KGfSoWzPwYnzIroU7UETNQ5V5vlwKtXBbKdO3Sxefxtr2Xy1HRcw5bKd1KGcw50H5WzP0PGcw5O3SJ8vtXBubnubnWzPV5vUCQUETNQ51HRlwK1HRkpFUCQwNQfSoDeKfSocw5XKgvF9J8vp3Efgtcw5tXB9XknOYfgt",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "short-2:3\nEizPYazp0kQqRe7BsMGlf75eNfH0f75ec5qsNagzbsYa5eexInoZzjAqkUEiBXQqkUguguxv5egunYoZguAq9aEiIDQqbssMQ6Rec5oZNaAqnYzPIJ8n5ekUc5a5bgTLYhEi0kfQgua5exEiReguTDQzAqpBWasIfQgzPpYhQqa5EioiqsguNapBlq5eWasI5egzQqMh9aYaPpO8btzvVkU0OKsMd3NaAqEOVk5ea5BXEi0kTLRwM1NfO8IDbTYapBqsguBXTLexM1zjlSInEisIOKxvpBTDgunYTLTDM1nYgu2iBXzvfQsIWaNfsIQ6zvNac5c5c5Q6A1bTTDO80kReTDzPzp",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "short-2:3\nEizPYazpO8btbTIDQ6GlNf5eQ6IDc55eNaWasIYanYex5efQc5M1IDzvf7EizvQqQzpBgugu5ec5nYoZzjAqexEiYaQqc5fQBAsMnYReIJoZ5eAqc5RwbglqEiYaguc5exVkbsa5YaBACyguMhEigzgusIBAlSQq5e5eQqWaEigzEixvgugu9EgusIpBpB0kguWuEiWa8nAqxvTDTLbsAqRebsO85eguLTxvopguReEOTL5eM1BXO8lqbTNa15NfpBQ6guBXTLguM1zv5e15xvsIQzxvOKkUguTDTLguAqxvoZopguzjBX5egzbssINfH02ic5Nac5c57BsMTDReQqReTDzPzp",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "short-2:3\nEizPInOKYazpO8TDbT7BQ6c5bt5eNfH0Q6A1NfWasIYaIDexzjoZYhM1U0AqkUEigugu5e9EnYReguc5BXCyOKM1c5TLNaguQzpBBXbT5efQBAO8EOM15eTLInCyguVkRwVkguAqO8BXYakU8nlq0kguTDpBAqsIWagz5eOKQqEiEigulSguxvpBgusIWagz5eMhQq8nEiPpTDWunYReTLexa5Ppa5btEixvd3c5AqbgoZc5lSlSRe5esMIJQqnYEiNfAqQ6oZYa5eexYazjpBLTQqsI0kxvTLTDIDsMIDNagunYBX5egzNasIc55eNac5qsOKc5GlsMPpReQqReTDbsWuzPzp",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "short-2:3\nInguexTDopBAYaMhMhgzO8CybTRGa5NaqsAqd3A19E8nAq5eEi5eYaguMhxvgzc5sIzPsId3Nfa5Nac5exPpbgPpa5gzzPNaU0Q6JnQzc5c5Rwc5exEiYagu5eguzjO8krkUU0gzJnLi15EO5ec5a5gz15xvd3kUa5RwexEiCyWuqsRe5e7B2i9a9aQ6krd3TLReEOpBLibgEiEO5eU0Yaa5MhNfpBTDqsOK5egzkre0MhoZQqA1EiMhYhzpU09a5eNaRwEiPpkUkrPpc5ReResYIDInguYa15WuOKEiYaWuYhexU0AqAqBAoZsMTDzPAqzpReTD15GlTDzjIDbt8nsIfQ5eQ6IJNfzPNaOK15kUa5nYgz9aQ6c5U0pBpBVkzjAqa5TLEiA1nYc5BXBXBA9E5enYnYkUPpsM7BbTQqO8TDMhzpYaU0M1MhTLgusMO8NaReIDRwBXzPexResMzjbTO8O8BAQ6fQVka5zjzPnYQqsI7BsMgzNaM1guWupBA1c5oiI3WaBXYaQqtEAqoiReRwQqJnzPWupBLibgYaAqlSCyoRVkc5zjGlnYO82i2isIguLTTDgu8nkUqsEiguVkMhc5Mhc5bgH0pBOKWa15WaVkRenYEisIf7BXH0gu5e9axv5eguWuc5IDQqEiMhkUWuEOH0TLoi9EEi5eEi5eH0WaBAAqCyResId3BX9aQ6bsc5TLMhEiNfVkH0sMM1ReoZAqQzTDzPRezpO8kUguex",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "short-2:3\ngugufQTDRezPlSgzbtoZf7M1WuH0MhNf15AqRec5fQLT8n5eEO5eLisIA1xvAqH0d3EiReEiAqzvgz9asIH05egz5eNaNac5exRebgc5c5c5ReEiJnguc5PpexguBXInsIWanYlSVkgzkrPpU0xvf7EiH0bt5ec5a5gzf7xvA1TDkUguBAO8exGl5eQ6zvd3VkCyTLguNalqsMEiEiJnzPU05eoiYatE8nYaAqgzQqe0BXM1I3gzkr7BMhNaQqNaEia5bgRepBsY5eReInzPVkQzQ6O8QzguReAqbTU0guzpopTD9aQq187BApGlJnnYTL5eM1sIoZ5e8nBXMhnYO8LibTlqoiEONanYQ6U0Qzc5NfpBQzbsAqa5VkTLgzNaQ6OKQzc5pBYhzja5lqsMbgRepBAqIJTDA1YaBAPpIDAqCy9EzjEiopIDTDYazpBXzPexsMsMMhbsWuO8exc5RekrEizjYanYzjsIO8LioiEORwguYhpBQqc5zpf7Mh5eoZf7oipBWaMhTDReNfQqa5RwIDqsguU0lSYhxvAqYakrRezjoRnYc5sI7BguRea5Eid3kUEiguVkMhc5Mhc5guJnzvLTgu2i2i9aWazjkU5eO8YaRefQWuguEi5eWuU0H0Ya5e5eYaEOQ6TLbtNfQqsIMh8nc5Waoiqsa5Mhd3YazPEic5TLgupBbtbgBXsMPpbTQ6lSMhO8PpAqNaTDRG9aLTCyCyzvMhYazpO8kUexex",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "short-2:3\nguguexTDRezPYagzMhM1f7H0O89a2iAqsMc5a50kYh5eAq5ef7gud3xvReH0opzPlSqsWaEisIoisIH0NfgzTLNaexQ6bgLTkUa5Eic5zPRwJnguc5gufQCyWuWaBXWaYaBX5enYnYTDLTlSkrMhJnguc5kUlqEibsRec57Blqc5lqf7a5d3exYa5e9EzjbgkrEOlqU0oia5NaNfEiTD5eYaYagz9ae0MhM1pBgzCy7B2iQzBXCyI3zvc5NapBoiguO818zjEiYaJnEi5eA1zjexVkAqQ6U0A10kRezpsMTDexzvYaTDLT7Ba5zjfQ5eNaA1TL5eM1BXYanYMhxvAq5eRezjbTqsa5pBEif7Q6c5NfQ6TLpBa5VkgzAqOKNaA1c5U0d3QzVknYsMOKopQzO8c5fQguTDIJoZopAqsIYhRwbtnYbsGlqsPpoiQqBXzpguzPbTsMO8qsc5MhkrguPpO8nYResIzPCyReApsYEiReQqa5MhYhkr2i5eNaWuQqWuzpQqMhAqoZOKoiReWaQqlSzPtEYhoia5InAqJnTLzvVkLinYpBsIReguoRkUQ6ReGlYaO85eguc5TD5exvH0gzU0c5VkMhzjkURwlqsIgzRwkUexO8CyReguEi5eEiU0H015oia5NaQzYhEOc5qsQqNaMh5ec55ea515d3gzEiAqA1Mhc5Yaop0ksIEiBXTLqsNaQ6oiMhbTNfReNaPpRGAqoZTDMhRwzpO8kUbtex",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "short-2:3\ntEnYsYMhU0TLnYbszjexQqBABXQqU05e5ebTsId35eU0zj7Bc5GlNakUInkUgugugu7BJMM18nlS5eQqYac55ePpEOc5bg5e5eM1a5QzQ6TLc5guBXnYsYNfJMQzgu7BI3c5U0gztEzPa5sMguQqa5QqVkNaexsIEiJMMhgu8nnYU0TDNazpNazPBX2iCyzvIDPpzjexTDd3EiQqTLBA5enYQqzvzpYaTDYhIDQqYaJnlqbtIJExEiqsVkgu5eTL2iOKNaEibTVkEiNflSJnWakrMh15lSxvzpA1Na9EzjnYexbtBA9aAqoioZsI9Elq5ec5BAReTDc5a5InVkVkoZEizpEiI3Qqa5pBWaNfA1Q6sMnYLTfQoRc5sMJnfQ5eguWuOKpBQ68nc5pBAqJMExNfIJ",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "short-2:3\ntELTsYExU0MhbsTLInc5zjexQqQq5efQJnbTc5fQ5eU0lq7B15GlQ6kU9aOKNafQQqIDgugugu7BzvIDVkM1VkVkopQq5ec5EOc5lqoZIDM15eTLfQguQ6InnYNasYzpJMMhguWakrzPU0sMtEQqNfQqVklSfQ5eEiVk8nEiTLIJguTDMhzpU0TDJnQqNaexNad3BXQqPpzjf7nYTDYaEiYhTLQq5eqszpbszPExYaEinYexguVkJMa5sI9ENaguqsa5NaBAbTJnEiPpgzI3c5xv7BWuNfBXnYc5zja5exoiAqsIA1bg5e9E5ec5TDd3a5Ei8na5fQJMoZEizpEiI3lSWupBkUNfa5c5WaLTopzjsMnYd3sIoR5esMU05eBXgupBQ6158nnYAqpB8nJMnYNfIJ",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "short-2:3\ntElqzvfQsYMhBATLU0Q6nYlSpBQqWusM5eoRJnU0c57B5eWazja5c5I38nLTpBRwIn7BEiM1EifQVkbtc5QqReBAc5c5bgc50koZ2iAqa5lqc5f7nYRwsYnYJMNfgu7Bkrc5U0qstEgza5zPVksMEiQqf7QqVk5eexVkguEiMhIJU09aNalqQqzpYhzPBXzpnYQqTDex15opd3EiTLQq5ezjInYaTDInA1NaYaQzTDJnnYExguEiJMbssITLNaa5NaRwbTguEiOK8nNf15JnWaRwMhI3zpxvNaQzzjBXgulqexQ6TLoiM15e5esI5eEOTD5e0kYaa55eVkJM9aguoZgu9EQqzpNaguNfkUQ6kUnYGlsIsM5ed3U0bTBX5eQqguzjexpBc5lSAqJMExNfnYA1IJ",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "a",
+   "token": "short-2:3\nLTa5AqTLVk",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "a",
+   "token": "short-2:3\nRwa5AqTLVk",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "a",
+   "token": "short-2:3\nTLa5IDAqVk",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "short-2:3\nTDxvnY5eBXxvInguc5EiReQqQ6pBNfbTNaO8Re8nsM5eAq9aBAa5VkTLIJc5PpI3gzQzsIQq5ed3H0Ei5eVkGlQqTDQza5GlVkc5d35eAqOKVkH0c55ebtWanY9EBXNf15Rwa55ezPWaTLVkM1AqoZTLexBXYagu9a15a5AqgzlqsIEiQ6kUc55eNaIJgzc5sI5eIDH0zva5c5TLWuEiQz0k7BQqTD7Ba5c52ic5zvbtpBLTguWaEi5ekrBXMhnYAqlSVka5sITLNfbTNaO8ReCysMc5fQBAguYaQz5eEiA1gulSc5kUgu",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "short-2:3\nEOnYLikUguzPxva5Q6EizvQqNasMO8OK15RebTNaTLWua5sInYIDBXa55eTLWac5sI2iH0Ei5eQqLTJnopApGlQqTDTD18GlApA1Jn5eAqH0Vk5eA1bszvgzc5fQQzNfBXc5TD5enYWaOKVkAqAqoZYaLTexBXguTLM1a5TLgzBXsIkUQ65eCyIJlSnYNa5eWac5sIH0BAa5c5TLlSEic59a7BQq157B18c5EiIDpBopguc5I35ekrInMhgzAqInA1IJVkVk5eAqNfsMO815bTRe2i9EpBNfguc5kUguEiEiTDpBLTbgBX",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "short-2:3\nqsnYApTDbtReNaYasMfQQ6CyNfEiOKbtBApBO8bTRe9asMNaAq5eLTVkVkAqLT0kbtc55eI3Wagu5e15c5Jnc5ApOKA1TDQqoi7BNac5Yh5eAqH0a5Pp9EWac5btc5NfnYQ6BXsI5egzYaa5TLTLM1BXlqguexoZYaAqAqReVkc5Wa5e5eIJc5OKNa5egzH0sIVk5e8nc5TLzvA1Gla5TDQq187BPpGlEi5epBH0QqsIEigzkrBXMhIJTLnYa515sIa5NfTLO8bTRelSsMopQqNaguWu5ec5OKU0c5YhPpJnCyEikU18BX",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "clash-3:1\nAYwp0Pt5WHmOtKm0i2HmOLEnahxyKVLEncxSHmO32hpufZ1NcYfeQqh5j9OzOUBcmvRb1LbULbUcmvx092D3DICDIC0i2p0PEuccmv0i2ySecmvLVmihjEucLbUiLudBr8W0",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "clash-3:1\nAYwp0Pt5WHmOtLKcxSySeyKVeQqLEnKozcmvHmO32hBo7OUBx09cmv9OzLbU0Xfcmvafo8xzLbUzQKtKmOUB2D3Z1N0i2p0PEuctKm0i2zgvcmv0i2LEnEucLbUHmOdBr8W0",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "clash-3:1\nAYwzgvKozHmOHmOLbUBo7ysT0i2LEnEuc0i2tKm32hp0PpVEx09h5jLbUcmvBo7LbUcmvpuf2D3cYf9OzOUB0i2Z1NRb1cmvHmOpufcmvyKVEuczgvLEnt5WdBrp0PysT8W0",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "clash-3:1\nx09LM6h5j9OzMU1i2NysTGoa4t6UantKmkT9LbU8xz0XgYtQUaniX6LEn4JVyKVafoEp3zKNM73zgvBaoqLCq4dzH4a8yOUBxKTYtQ8xzx095cq8W0dBrEuc32hmO40i2ySecyKafo2D3HmOyhDp0P9OzcYfpufiLuLEnp0P5cqt16DSTLEnAYwcmvubK9NciLuihjWV8jSGpVEcYfLEnEgoABft5WSv7ySeEucwcfABfOXcctfeQqPJ4qLCMOa9M1OUBYjoLVmp0PR6SysTzQKVbO",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "clash-3:1\nx09LM6R6SUani2NYjopVE4t6MOaLbUBo70XgOUBiX6afoLEnyKVABfnZEzKNahxEgozQKnZEpufBaoWV8a8yihjzH4cmvysTeQqLVmAYwtLKDSTt168W0iLuzgvLEn0i2ahxcyKahx2D3HmOyhDp0P9Oz32hcxScYfdBrEucp0Px09iLuLEnxKTpVEzgv9NciLuubKq4dqLCjSGysTM73LEn8xztKmySeEp3t5WSv74JVEucwcfABfOXcctfkT9qLC9M1GoanZEp0PMU1zgv9OzVbO",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "clash-3:1\nx09LM6R6SBo7i2NYjoLbUihj4t6KozMOah5jwcfYtQ0Xg8xzABfiX6cYf4JVyKVM73Ep3zKNjSGBaoWV8a8yzH49NcPJ4zQKGe5LEnUanxKTzgvx09t16ihjdBrGe5p0P32hKoz2D3cyKyhDahxHmOYtQLEn9Oz0i28W0YtQEucAYwp0PDSTmO4eQqcmvBo7ubKfjeq4dGe5qLCeQqcYfysTABfLEnEgoBo7t5WSv70XfLEnEuckT9ySeOXczgv8xzctfGoaqLC9M1MU1p0P9OzVbO",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "clash-3:1\nq2Ktu2jViJq8yAizgvHmOAGKSbuOUBrC1j2Th5jGOKaLd8bAmLWiLumO4C6QbwrCoZ8W0ZG28xzsHoIJCtKV1LpiLuEXbMk6ysTUERXW7NJqnQ7j3U3BjUan5cqZ1NQAvbwrcmv9MJLEnwcfeXQa8ycyKSbP",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "clash-3:1\nq2Ktu2jVimO4yAi9MJLEnSbuQAvbwrj2TiLuZ1NaLdmLWfjePJ4C6Q8bAEXb8W0h5jZG2tKVCoZIJC1LpsHoMk6XW7zQKNJqysTbwrmO4j3UUER3s83BjGOKtLKaforC1cmvHmOAGKwcftKmeXQa8ycyKSbP",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "clash-3:1\nq2Ktu2jViwcfDICcxSysTPJ4yAipVEAGKSbuj3Uh5jrC1NJqGOKaLdCoZUERC6QIJCJq8EXbtKVGe5ZG28W0Ge5sHobwr1LpnZEmLWMk6XW7j2TLVm8bAQAv3BjZ1N9MJbwrcmveXQHmOLEn8xza8ycyKSbP",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "clash-3:1\nq2Ktu2ihjzQKeXQyAiHmOAGKSbuLVmrC1j2T3BjGOKzgv8bAmLWUERMk6bwrEXbihj8W0ZG2IJCsHoPJ4tKV1Lp3s8Ge5iLuCoZC6QXW7NJqaLdcxSj3UfjeZ1NcYfQAvbwrcmv9MJLEnwcfjVia8ycyKSbP",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "a",
+   "token": "clash-3:1\nzQK2D3",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "a",
+   "token": "clash-3:1\nihj2D3",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "a",
+   "token": "clash-3:1\nzQK2D3",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "clash-3:1\ntLKpufGe5pufp0Pp0Pctf32h0XfubKt5WzgvahxOUBt5WLbU32hLbU2D3Euc0i2ahxHmOt5W2D3dBrihjdBrcmvLbU0Xf2D3cxS2D3cmvHmOahxtKmcYf",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "clash-3:1\npufpufcmvp0Pp0P5cq0XfLbUubKPJ4ahxcYfihjt5Wt5WLbUYtQLbU2D3fjeEuc0i2HmORb132hdBrnZE2D3cmvdBrt5W2D332h2D3ctfKozHmOBo7cYf",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "clash-3:1\neQqLVmcmvp0Pp0Pctf2D3LbUubKcmvYtQdBrt5Wt5WHmODICahxLbU2D3Euc0i20Xfzgv32hRb1LbUtLK2D3ySedBrt5WysT32h2D3h5jHmOcYfOUBySe",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "clash-3:1\nYtQpVEpufcmv2D3ctf2D3iLuDICLVmihjcYfdBrahxt5WLbU32hLbU2D3Euc0i2ySeHmOt5W2D3mO40XfdBrcmvt5WLbUubKDIC32hp0Pp0PHmOLVmpVE",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "clash-3:2\nfVeTo0KDicLR6DJTINvSNI0aykdn9rI0aUQaPAVX2PX2PX4CTINQL296vYtpQyg1UlecFm5cDAUJ9Mai2v9X96vWyeBIoCgOJ9MQygrZ1RCw1Ul1frc6eai2N9P1Ul6DJIfWQyg1UlBIoqIwaibuCGX4C4wlydR1frWyerZ1To0CgOOltc6eai2ai2OltX2PBIovexWyev9XDAUc6ePAVm5cPAVDAUX2PqZSEeUX4CydR4bZMbX1UlUQav9XWyeuCGKDiSFB1frv0DgGfsLQOoxqIwDAU4wlUQaCgOc6eI0a1frai2QL2v0Da0i96vc6eX2PCjT2rUIlBFe11frAoZFv4ai2a0i96vOltrZ1c6eEeUrZ1c6e90NsLQ1UlxTYaeBH4Xykd1Ul",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "clash-3:2\nfVeTo0ykdbr5H4XxTYaeBsLQv0DvSNrZ1ykdn9rrZ1PAVbr5a0iOltX4CBIoai2QL2ecF1frQygbwdDAUc6ep1dv9XWyeQL2T3A1frT3A1UlgGfrZ1KDigGf1Peai2sLQIfW6DJ1frFv41UlTINuCGrZ14wlCjT4bZMbXqZSFv4lAEPAVDAUc6eDAUPAVOltu1cTINPAVX2PrZ1bwdai2c6eai2aibOltX2P1frrZ1ydRu1cydR1UlPAVCgOAoZQygTINSFB1UlN9PqIwc6e1fr4wlDAUc6eI0aQygai290NBIoUQadq6ai296va0i1Ul96vX2P96vIlBFe1X2PP1gFe17HJ96vX2PEeUc6eI0aaeBc6eI0aTIN1Ul6DJcLRMbX90N7HJ1Ul",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "clash-3:2\nfVe7HJcLRxTY6DJvSNykdI0aX4CEeUrZ1OltX2PrZ1QL2p1d1Pe1frYtpvexQyg1Ul6DJc6eai2J9MqIwaibFe1Qyg1UlCgOc6eai2a0iJ9MJ9Mdq6gGfvexc6e1frQygCgO96vecFN9P6DJ4wlSFB1frgGfCgOFv4TIN1Ulc6e1PerZ1PAVOltOltuCGqIwai2DAUc6eaibu1cPAVX2PX2PqZSai2ydRydRDAUuCG96vAoZecF6DJ4bZIfW1PeYtpqIw1fr1Ul4wlrZ16DJI0aai21UlQL296vsLQ96vX2PDAUecFIlB1frlAE90NuCGQL2zVvDAUa0i96vu1cYtp7HJ96vX2Pp1dai2c6eI0aPAVc6eJ9Mn9rsLQ1UlTINH4XTo0ykd1Ul",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "Hello World! This is a test string.",
+   "token": "clash-3:2\nfVeCjTcLRxTY6DJvSNykdI0an9rEeUrZ1PAVOltrZ1gGfOoxa0iQL21Pe2rU96v1frFe1Qyg1UlecFDAUCjTa0iai2lAEQL26DJ1frc6ebr51UlCjTYtpc6e1frsLQ90NqIw6DJ1fr1PeQyg1UlqIwPAVrZ11UlCgO4bZrZ11frFv4OltaibDAUc6eai2PAVlAEX2PFv4OltaibDAUc6eai2PAVlAEX2PqZSv0DydRydR4wluCGuCGTINaibSFBbwdIfWN9P1UlJ9MCjTai24wlaeBDAUT3ArZ1QygI0aai2QL296vbr5c6e96vX2PMbXIlBzVvgGfv9XWyem5cBIobwdai296vX2PX2Pc6eI0aCgOc6evex7HJsLQ1UlTINH4XTo0ykd1Ul",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "clash-3:2\nv0DuCGecFBMaydRGjuX2PUQaP1gBMasLQIfWPAVzVvGjuzVvydRp1dSFBIfWQygFv4X2PT3AerVOlt1Pebr5CjTFv4Z86lAEBMaOoxai2J9MEeUuCGaW0aibKDiGjuydRQL2L5MTINX2PPAVrZ1a0iFhP1UlAoZTINvexn9rfVeBMaaibQygFv496vaibecFFv4aW0dq6a0iMbXIlB4wllAETINecFu1caeBP1gm5c4wlX2P96vSFBaibKDibwdQL2AoZFv4ai2TINFv4To0TINcLRX2Pykd7HJbr5aW0v9XaeBI0aqZSMbXSFBydR1UlEeUTo0QL2IlBuCGTo0To090N1Ul1PeydRydRuCGBMaCjTEeU1Ul1UlcLRxTYP1gvSNa0iI0aX2PqIw1fr4wlFv4Fe1aibIlB4bZFe1ai2aeBaeBqIwlAE4wl4bZ1frrZ1c6e96vBIobr5TINFe1sLQykdYtp6DJIfWqZSrZ11Ul1frQygfVeWyeEeUH4Xvexai2kcV96vsLQWye6DJ90Nai2kcVP1gaW04bZ2rUvSNa0i96vecFWyeEeUaibDAUc6evexIlBOltqZSFe1cLRIlBe4np1d6DJv9XZ86UQaerV96vfVe2rU6DJFe1AoZGjuecF96vX2P8JpPbiJ9MlAEuCGqIwFhPu1cykdvexEeUaeBlAEDAUP1gPbi96vCjTu1cai2gGfkcV96vlAErZ1ai2H4XzVvqIwaibUQaFhPrZ1vexEeUbr5aibai2PAVTo0X2Pe4np1dv9Xv0D1frGju2rUm5c90NAoZYtpFv4TINcLd1Ul6DJv0DqZSrZ1X4CydR1UlOltrZ1",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "clash-3:2\nuCG1UlOltecFydRGjuX2PrZ1dq6P1gp1dcLdIfWsLQGjuSFBKDi1frv0DydRFv4dq6v9XTo0aibe4nZ86BMavexEeUaW0PAV90NrZ1lAE2rUydRFhPL5MTINP1grZ1Pbiai21UlT3AQL2TINfVeOoxFhPQygP1gEeURCwEeU1PeT3AaibecF8Jp96vecFIlBX2PlAEOoxGjufVe4wl4wl96v90NP1gIlBqZSP1gUQaQL2v9XFv4aibaibUQaaeBQL2cLRecFai2vSNzVvT3Av9XaW0lAEqZSai2a0iJ9MydRkcVTINPAVsLQkcVdq6ai2uCGMbXuCGTo0dq6Oox90NydRCjTuCGBMarZ1EeU1Ul1UlcLRm5cTo0xTYm5cc6evSNa0i4bZ96vJ9MqIwqIw1frT3ATINbwdFe1rZ1IlBPAVu1cai24wl4bZX4CX2PFe14wl7HJ1frrZ1TINI0alAEm5cai2sLQykd6DJqZSIfWydR1fr1UlQygJ9MfVe1UlOoxH4XqIwaibIlBQL296vrZ11Ul6DJzVvP1g4bZSFB96vX2PI0aQL26DJaW0DAUc6eykdIlBOltKDiFe1cLRTINe4nX2P6DJT3AZ86lAEerVBIoSFBvexFe16DJm5cAoZTINa0i96vFe1Fv4PbiaW0Fv4lAECgOykdn9rTo0AoZDAUWyea0i96vBMaX2Pai2lAE96vlAEFhPH4XBIoPAVFe1ai2kcVp1drZ1GjuEeUai2aibOltbwdT3Adq6X2PFv4p1dX2PerVIfWGjuQygbr5lAE2rUQL26DJPAVMbX1UlBMa6DJqZSOoxUQa2rUBMaT3AydRJ9MrZ1",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "clash-3:2\nuCG1UlecFMbXydRBMaGjuqZSX2PP1gsLQcLdIfWecFGjuSFBJ9MQygRCwv9XerVp1dX2PRCwaibai2Z86BMarZ1aW0aibTo0rZ1Gjudq6ydRkcVlAE96vecFai2Oox2rUa0iPbiFhPAoZlAETINn9rBMaFhPykdTINPAVlAEYtpMbXPbiecF8JpFv4aW0ecFa0iFe1lAE4wlfVe4wlYtp6DJ96vJ9MSFBIlBT3AaeBv9Xe4nBIoFv47HJaibTINQL2ecFMbXai2vSNzVvDAUv9XaW0X4CKDiqZS96vSFBaeB4bZBIoP1g6DJkcVIlB96vH4X2rUai2To0fVeuCG1UluCGQygIfWCjTaeB1UlykdqZSxTYTIN1UlvSNa0iUQam5cX2PTIN1fr4wlc6eWyeBIoCjTFe1u1cFe14bZqIwai24wl4bZIlB1frrZ1v9XvexI0aqIwPAVrZ196vp1dsLQ90N6DJOoxcLRrZ1CgOEeUydR1frBMa90N1UlydRqIwaibaeBQL2X4CuCGsLQ1UlFe1kcVP1gydRCjTa0iai2X2P96vI0aecF6DJaW0c6e90NykdIlBOltcLRFe11Pe90NcLRaibWyeX2Pv9XqZSZ86P1gX4CerVlAEm5cQL26DJTINAoZGjuIlB96vX2PzVvbwdUQaaeBKDi96vrZ1QL26DJQygdq6J9MfVeEeUUQa1UlDAUP1ggGf96vX2P6DJQL296vL5Mai2H4X1PeWyeEeUOoxai2FhPEeUlAEEeUFv4PAVOltTo0e4nX2PFv4IfWGju1frydR96vPAVRCw6DJBMa1Ul6DJOoxrZ1T3ACjTCjTydROltrZ1",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "clash-3:2\nuCG1UlOltecFJ9MGjuX2P6DJP1gm5csLQcLdUQaEeUPAVGjuydR1frv0Dv9XFv4erVe4naibFv4X2Pu1cBMaai2EeUX4CrZ1aW0aibai2rZ1GjuTo0RCwkcVai2BIoaeB96v90NFe1ai2FhP1Ula0ilAETINAoZCgOBMan9rFhPQygzVvp1dFv4lAEaibecF96vaW0ecFX2PFe1lAEGju7HJfVeFe16DJ96v1Pe90NIlBZ86qZSv9Xe4nBIoFv4Fe1u1cTINCjTecFykdai21PeaW0bwdaW0I0aaibqZSai2X2PydR96v4bZecF6DJ6DJbwdIlB96vH4XTo0ai2ydR1Pe1Ul1UluCGydRIfWEeU6DJykdcLR1PezVv7HJBIovSN90NI0a96vX2P1fr1fr4wlFe1WyeX4Cai2IlBFe1BIo4bZqIwv9X4wl4bZqIwrZ1c6ea0ibwdMbXTINP1gFe1xTYsLQ1Ul1UlqZSrZ1BMa1frQygdq6lAETo0fVeai2QL2uCGsLQ1UlkcVkcVP1gMbXa0i96vSFBFv4lAEv0DDAUp1dv9X1Pec6evSNIlBOltcLRRCwQL2aibcLRaibWyeX2Pv9XbwdP1gerVSFBBIoP1g4wl4wlAoZTINa0i96vIlBFv4Pbi8JpFv41PelAEaibykdKDim5cp1dv0DRCwEeUfVeDAUP1gu1c96vX2PPbigGfQL2P1glAEX4CL5MH4XlAEydRai290NKDiFhPgGfUQalAEEeUUQaPAVOltZ86p1dJ9MTo0X2PX4CQygIfWGjuSFBYtpWyeIfWCgOTo0BMaYtp1UlKDiqZSrZ1BMaydRydRm5crZ1",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "The quick brown fox jumps over the lazy dog.\nTHE QUICK BROWN FOX 0123456789",
+   "token": "clash-3:2\nuCG1UlecFBMarZ1u1cX2P6DJP1gBMasLQIfW1PeAoZGjuSFBIfWQygFv4X2P2rUTo02rUKDiFv4PAVZ86BMaai2EeUaW0rZ1rZ1Gju6DJkcVL5MlAEqIwCgOlAEPbiFhP96v1UllAEQL2fVeBMa96vQyg96vDAU6DJecFn9raW0ecFqIwzVvzVvaeBlAEJ9MX2PfVe4wlGju96vSFB4wlqZSlAEP1gQL26DJerVaibTINv9XCjTJ9MaibykdvSNFe1v9XaW0gGfOoxI0aIlBqZSai2DAUydRFv4Fv4lAEaiba0ikcVv0DkcVuCGH4XsLQfVeydRai2uCGBMap1dEeU1Ul1Ul1PecLRydRxTY90NqZS1PeTIN1Ula0i96vQL2T3AX2Pc6eT3AqIw1fr4wlTINFe1PAVrZ1ai2IlBFe1Oox4bZqIwp1d4wl4bZ1frrZ1KDiCgOI0alAEv0D6DJsLQvSNv0D6DJ7HJrZ1p1ddq61frQygykdTINPAVIfWgGfrZ11UlQL296vTo01Ul6DJIlBP1g4bZT3A96vX2Pu1clAEaibSFBc6eai2v0DUQaOlt90NQL2dq6aW090NcLRecFe4nX2PcLRZ86P1gFv4dq6BIoT3AFe1m5cIlBAoZYtp6DJa0i96vTINFv4PbiFe196vuCGIlBaibykd8JpEeUAoZecFP1ga0iFhPX2Pai2TINYtpCjTMbX7HJdq6aibai2H4XuCGQL2OoxydRai2FhPaiblAEEeUKDi2rU7HJdq6OltX2Paibdq6e4nerVv9X2rU1frGjuydRPAVFv4TINcLd7HJ1Ulp1dqZSX4CGjuydRydROltrZ1",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "clash-3:2\nv9XOltv0Dai2P1g1frIlBEeUQygFe1erVWyelAEBIoQyga0ifVeFe1RCwGjuydR2rU1PeZ86DAUaeBvexxTY1PeQL2rZ1P1gm5cUQafVeWyep1dp1dp1d4wlxTYkcVerVerVIlB4wlZ86vSNX4Cp1daibSFBX2Pc6ev9XYtp96v7HJWyeBMaL5MxTYH4XFv4OltFhPX2P1Ulp1daeBcLR1fre4nbr5N9PFv4IlBEeUecFI0aCWlZ868JpYtpykdb1z6DJ96vIfWN9POlte4nBMae4nGjuAoZPAVykdFhPcLd8Jp7HJykdfVeOltX2PcLRPAVrZ1MbXerV1frUQaTINe4nSFBIfWIfWN9PTINDAUPAVOoxOltzVvaeBfVeH4XOltUQac6eai2IlBrZ1c6e8Jp7HJI0aKDi96vX2PFhPai2H4XecFcLRaibQL2Fe1zVvp1dIlB1frsLQ",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "clash-3:2\nv9XOltP1gai2QL2KDiaibbwdQygH4XerVWyeX2PFhPBIoa0ifVeJ9MrZ1UQa8JpCjTydRIlBOltZ86fVerZ1QL2Oltm5cDAUfVeIfWIfWgGfCgOxTYkcVTINerVIlBJ9MZ86vSNPAVaibykdOltbr5c6eaeB96vPAVFhPBMae4nGjuH4XOoxBMaaeBOltCgOaeBJ9MX2P96vX4CaeBykdcLRe4nZ86N9PFv4IlBEeUecFI0aCWl1fr8Jpb1z1Ul6DJKDiJ9MIfWN9PFhPFv4e4nOltaeBL5MxTYAoZykdWyev9X8JpcLdSFBfVeX2PcLRCjTX2P4wlerVrZ1RCwerV1fr4wlRCwe4nSFBMbXWyev0DN9PP1gTINPAVv0DxTYH4XJ9MDAUc6eGjuai2CjTFe1c6eI0aQygdq696vMbXlAEai2ecFFe1cLREeUIlBFe11frIlB1frsLQ",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "clash-3:2\nv9XOltP1gIlBQL2EeUCjTecFerVCjTFhPBIo2rUfVeFe1ai2v0DGjuX2PIlBZ86J9MQL2OltrZ1DAUfVeKDiWyegGfDAUOoxe4nxTYkcV1frv9XIlBrZ1IfWvSNKDi4wlX2P1PeerVykdX2PPAVbr5cLdbwd96vbwdSFBWyeBMaUQaxTYp1dAoZOltCgOBMaFhP96vN9PykdaeB6DJcLRdq6e4nZ86N9PFv4IlBEeUecFI0aCWl1fr8Jpb1zRCwX2PIfW1UlFv4e4nOltL5MGjuH4XykdFhPe4nv9X8JpPAVCjTfVeT3AOltcLRc6e4wlerVaibv0DTINCgObwdSFBZ86N9POoxerVWyeBIoxTYH4XOltIfWm5cCgOCgOc6eai2P1gc6eI0afVea0i96vydRlAE7HJ8JpH4XFe1QygcLRaibWyeIlBFe1Qygai2Ytp1frCjT1frsLQ",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "Symbols: !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+   "token": "clash-3:2\nv9XOltP1gai2QL2EeUaibecFerVFe1FhPBIoCjTfVeYtpX2PX4CgGfa0iGjuUQarZ1ydRIlBDAUfVeQL2xTYP1gDAUAoZWyeCgOIfWIfWe4nTINkcV1fru1cIlBrZ1PAVbr5br5fVeX2Paibv9XX2Pc6eFhP96vp1dGjuKDiWyee4nBMae4nIfWxTYH4X6DJCgOOlte4nOox96vu1c1Pe1UlIlBykdCgON9P1frZ86cLRCjTecFdq6EeUFv4RCwI0aCWlFhP8Jpb1zOltX2PX4CRCwN9PFv490NBMaL5MPAVAoZykdcLdCgO1Peykd8JpSFBvSNOltcLRZ864wlMbXerVerVerVxTY4wlSFBCjT90NN9PfVeFv4TINOltH4XOltZ86c6eai2Ooxc6eI0a8Jp96vMbXFe1lAEai2QygvexH4XWyeRCwcLRQygIlBFe11frIlB1frsLQ",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "a",
+   "token": "clash-3:2\nu1c4bZ1fr4wl",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "a",
+   "token": "clash-3:2\n1fr4bZX4C4wl",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "a",
+   "token": "clash-3:2\n1fr4bZX4C4wl",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "clash-3:2\naiblAETINuCGPAVaibDAUc6eai2sLQ1Ul6DJlAE4bZai24wlCjT1frbwdzVvIlBzVvOltOltQL2n9rc6eai2TINTo0ai2BIoTINvSNOoxm5cykdKDiEeUzVvn9r7HJ1Pe4wlX2PrZ1KDiI0aPAVecFX2PUQav0D4wl4bZJ9Mai2QL296v1frQyg1fr1UlT3AOoxRCw96vOltX4C6DJc6eqIw1frOltykdbr5PAVEeU4wln9r4bZ1frzVvv9XWyexTYgGfxTYlAEvSNykdDAUEeUPAVbwdX2Pm5cKDiqIw1fr4bZ4wl4wlEeU1frsLQ1Ul6DJrZ1c6eI0aTINqIwrZ1Fv4Fv4AoZ",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "clash-3:2\n6DJQL26DJ96vlAE6DJzVvCgOc6eai26DJp1dvex1fr6DJX4C4wlCgOlAEX2Pai24wlPAVMbX1frykdOltaeBxTYaeBDAUuCGai2Oox2rUecF6DJn9rTINgGfgGfvexvSNFe1n9rEeUBIoKDiOox1frOltX2Pv0Dc6eI0a1frPAVOltX2P4wl4bZbr5ai2QL2rZ190N96vPAVQyg1UlT3AP1gv0DykdqIw1frp1d4wlykdxTYEeU4wl96v4bZ1frc6eqIwaibQL2TINvSNIlBn9rEeU4bZaeBOltEeUqIw1frzVv4wl4bZ1UlsLQ1UlsLQrZ1c6eDAUI0aFv4ecFaiblAEQL2lAE",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "clash-3:2\nOoxFe16DJTINTo0UQarZ1Wyec6eai2rZ1T3A1UlsLQlAEEeUgGfai2u1c1frT3AMbXX2P1frIlBEeUQL2CjTvSNMbXc6eTINai2TIN1frrZ1v0D4bZTINvSNbr5ykdn9rn9rEeUPAV1frUQaX2PBIoc6eI0a1UlOltX2P1fr4bZ1frai2QL296v4wl90NQygPAVv9XWyerZ1vexqIwOlt4wlykdT3AEeUaeBbwdv0D4wlxTYT3A90NPAVAoZFv4gGfxTYTINDAUykdn9rOltPAVOlt4bZvexqIw4wl4wl4wlOox4bZ1fr6DJ1Ul6DJsLQc6eI0aDAUzVvEeUPAVBIoP1gQL2lAE",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "  leading and trailing spaces  ",
+   "token": "clash-3:2\nTINFv4v0DYtpCjTBIoP1gJ9MFe1DAUc6eai2sLQm5c6DJlAEsLQYtpai24wldq64bZqIwIlBOltOltJ9MDAUn9rai2BIoTINbwdFe16DJxTYTIN1frm5cvSNMbXn9rEeUykdOltX2PgGfUQaCgOTINI0aPAVAoZX2P4wlT3A1frai2QL296v1fr4bZQyg1UlOltCjTFv4c6eqIw1frrZ1Oox4wlPAVn9rEeUykd4wl4bZ1Pe96vecFCgOxTYMbXP1gvSNykdc6eEeUPAVQL2X2PgGf1fr1fr4wl4wl4bZ1frEeU1Ul1Pe1Ul6DJrZ1c6eI0aFv4dq6UQalAEBIoaibAoZWyev9X",
+   "original_decoder_ok": false
+  },
+  {
+   "text": "Hello World",
+   "token": "big fun-2:2\nYUYxmyctq1YUQ2yR2ILV9TzVyIcTJL9tW4LV9TctYUctYUluL8BPs4EP",
+   "original_decoder_ok": true
+  },
+  {
+   "text": "spaces in the family name",
+   "token": "big fun-2:2\nbFL8HS3dxOEPf4uGxEQ7L8O7tnijJLYU2HlucTGJuG0wezEPLVBP2lJjGJuBYUL8luxEtnezcTtnWv2Hf43z3dlucTLV0wHSctW4WhluJLesm44a3zEPf4PQGJW4lu",
+   "original_decoder_ok": true
+  }
+ ]
+}

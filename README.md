@@ -185,7 +185,7 @@ To install the latest code from GitHub:
 python -m pip install "git+https://github.com/thisismudith/YACE.git"
 ```
 
-YACE needs Python 3.9 or newer and has no third-party dependencies.
+YACE needs Python 3.10 or newer and has no third-party dependencies.
 
 ## Quick start
 

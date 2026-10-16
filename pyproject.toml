@@ -7,7 +7,7 @@ name = "yace-codec"
 dynamic = ["version"]
 description = "YACE (Yet Another Custom Encoder): reversible text encoding with random substitution tables, plus authenticated encryption with your own secret token, with no dependencies."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Mudith Daga" }]
@@ -31,7 +31,6 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -44,6 +43,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8", "hypothesis>=6.100"]
 
 [project.urls]
 Homepage = "https://github.com/thisismudith/YACE"
@@ -62,3 +64,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 yace_codec = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
