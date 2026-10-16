@@ -272,13 +272,11 @@ def test_cli_encrypt_decrypt(run, tmp_path):
     assert run("decrypt", stdin=token)[:2] == (0, blob.read_bytes())
 
 
-@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 def test_cli_token(run, monkeypatch):
     monkeypatch.delenv("YACE_CODEC_PASSWORD", raising=False)
     monkeypatch.setenv("YACE_CODEC_TOKEN", "s3cret")
-    with pytest.warns(DeprecationWarning, match="YACE_CODEC_TOKEN"):
-        code, token, err = run("encrypt", "--token", "--text", "via env")
-    assert code == 0 and "deprecated" in err
+    code, token, err = run("encrypt", "--token", "--text", "via env")
+    assert code == 0 and "deprecated" in err and "YACE_CODEC_TOKEN" in err
     assert run("decrypt", "--token", stdin=token)[:2] == (0, b"via env")
     monkeypatch.delenv("YACE_CODEC_TOKEN")
     monkeypatch.setenv("YACE_CODEC_PASSWORD", "s3cret")  # 0.2.0 name
@@ -293,6 +291,7 @@ def test_cli_password_prompt(run, monkeypatch):
     monkeypatch.delenv("YACE_CODEC_TOKEN", raising=False)
     answers = iter(["typed", "typed", "typed"])
     monkeypatch.setattr("getpass.getpass", lambda prompt="": next(answers))
+    monkeypatch.setattr("yace_codec.cli._can_prompt", lambda: True)
     code, token, _ = run("encrypt", "-p", "--text", "prompted")
     assert code == 0 and run("decrypt", "-p", stdin=token)[:2] == (0, b"prompted")
     answers = iter(["one", "two"])
@@ -318,5 +317,11 @@ def test_cli_keys(run, tmp_path):
 def test_cli_max_age(run, tmp_path):
     code, token, _ = run("encrypt", "--text", "fresh")
     assert run("decrypt", "--max-age", "60", stdin=token)[:2] == (0, b"fresh")
-    code, _, err = run("decrypt", "--max-age", "-1", stdin=token)
+    old = sealed.seal(
+        b"stale", text=True, key=yace.KeyStore.default().get_key("default"), now=time.time() - 100
+    )
+    code, _, err = run("decrypt", "--max-age", "10", stdin=old.encode())
     assert code == 1 and "seconds ago" in err
+    with pytest.raises(SystemExit) as exit_info:
+        run("decrypt", "--max-age", "-1", stdin=token)
+    assert exit_info.value.code == 2

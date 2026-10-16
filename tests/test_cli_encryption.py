@@ -73,8 +73,9 @@ def test_token_stdin(run, tmp_path):
     assert run("decrypt", tmp_path / "enc.txt", "--token-stdin", stdin=b"line secret\n")[:2] == (
         0, b"secret file",
     )
-    code, _, err = run("encrypt", "--token-stdin", stdin=b"secret\n")
-    assert code == 1 and "--token-stdin" in err
+    with pytest.raises(SystemExit) as exit_info:
+        run("encrypt", "--token-stdin", stdin=b"secret\n")
+    assert exit_info.value.code == 2
 
 
 def test_secret_options_are_exclusive(run, tmp_path):
@@ -90,8 +91,7 @@ def test_secret_options_are_exclusive(run, tmp_path):
 
 def test_environment_variables_are_deprecated(run, monkeypatch):
     monkeypatch.setenv("YACE_CODEC_PASSWORD", "env secret")
-    with pytest.warns(DeprecationWarning):
-        code, token, err = run("encrypt", "--token", "--text", "env")
+    code, token, err = run("encrypt", "--token", "--text", "env")
     assert code == 0 and "deprecated" in err and "YACE_CODEC_PASSWORD" in err
     assert yace.decrypt(token.decode(), token="env secret") == "env"
 
@@ -152,10 +152,13 @@ def test_keyring_backend(run, memory_keyring):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 def test_dpapi_backend(run, tmp_path):
-    store = tmp_path / "dpapi.json"
+    store = tmp_path / "store.json"  # -k names the key store; DPAPI keys go next to it
     code, token, _ = run("encrypt", "--text", "dpapi", "--key-backend", "dpapi", "-k", store)
-    assert code == 0 and b"secret" not in store.read_bytes()
+    dpapi_file = tmp_path / "keys-dpapi.json"
+    assert code == 0 and not store.exists() and b"secret" not in dpapi_file.read_bytes()
     assert run("decrypt", "--key-backend", "dpapi", "-k", store, stdin=token)[:2] == (0, b"dpapi")
+    code, _, err = run("decrypt", "-k", store, stdin=token)
+    assert code == 1 and "--key-backend" in err
 
 
 def test_legacy_tokens_decrypt_from_the_command_line(run, tmp_path):

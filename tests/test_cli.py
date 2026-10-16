@@ -61,7 +61,7 @@ def test_unsupported_text_suggests_binary(run):
 
 
 def test_invalid_utf8_suggests_binary(run):
-    code, _, err = run("encode", stdin=b"\xff\xfe")
+    code, _, err = run("encode", stdin=b"caf\xe9 \x80")
     assert code == 1 and "not valid UTF-8" in err and "--binary" in err
 
 
