@@ -38,11 +38,12 @@ from typing import Iterable, List, Optional, Tuple, Union
 from . import _algorithms
 from ._algorithms import DEFAULT_ALGORITHM, hkdf_expand
 from ._text import TokenLike, token_text
-from .errors import DecodingError, DecryptionError, EncodingError, TokenExpiredError
+from .errors import DecodingError, DecryptionError, EncodingError, InvalidKeyError, TokenExpiredError
 
 __all__ = [
     "DEFAULT_ALGORITHM",
     "KEY_SIZE",
+    "check_key",
     "looks_encrypted",
     "padme",
     "seal",
@@ -137,7 +138,7 @@ def unseal(
     aad_block = _aad_block(aad)
     prefix, raw = _token_bytes(token)
     salt = raw[:SALT_SIZE]
-    candidates = [_secret(salt, secret=secret)] if secret is not None else [_check_key(k) for k in keys]
+    candidates = [_secret(salt, secret=secret)] if secret is not None else [check_key(k) for k in keys]
     if not candidates:
         raise DecryptionError("no keys to try; pass the secret token if one was used")
     unavailable: List[DecryptionError] = []
@@ -295,12 +296,13 @@ def _check_salt(salt: bytes) -> bytes:
     return bytes(salt)
 
 
-def _check_key(key: object) -> bytes:
+def check_key(key: object) -> bytes:
+    """Return ``key`` as bytes; raise InvalidKeyError unless it is 32 bytes."""
     if not isinstance(key, (bytes, bytearray, memoryview)):
         raise TypeError(f"a key must be bytes, not {type(key).__name__}")
     key = bytes(key)
     if len(key) != KEY_SIZE:
-        raise ValueError(f"a key must be {KEY_SIZE} bytes, not {len(key)}")
+        raise InvalidKeyError(f"a key must be {KEY_SIZE} bytes, not {len(key)}")
     return key
 
 
@@ -308,7 +310,7 @@ def _secret(salt: bytes, *, key: Optional[bytes] = None, secret: Optional[Secret
     if (key is None) == (secret is None):
         raise ValueError("pass exactly one of key and secret")
     if key is not None:
-        return _check_key(key)
+        return check_key(key)
     if isinstance(secret, str):
         try:
             material = secret.encode("utf-8")

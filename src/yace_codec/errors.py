@@ -12,6 +12,7 @@ __all__ = [
     "DecodingError",
     "DecryptionError",
     "EncodingError",
+    "InvalidKeyError",
     "InvalidNameError",
     "KeyStoreError",
     "TableNotFoundError",
@@ -27,6 +28,10 @@ class YaceError(Exception):
 
 class InvalidNameError(YaceError, ValueError):
     """A table family name is not allowed."""
+
+
+class InvalidKeyError(YaceError, ValueError):
+    """A raw encryption key is not 32 bytes."""
 
 
 class EncodingError(YaceError, ValueError):

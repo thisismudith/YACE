@@ -27,12 +27,14 @@ from .codec import (
     encode,
     encode_bytes,
     encrypt,
+    generate_key,
     parse_header,
 )
 from .errors import (
     DecodingError,
     DecryptionError,
     EncodingError,
+    InvalidKeyError,
     InvalidNameError,
     KeyStoreError,
     TableNotFoundError,
@@ -65,6 +67,7 @@ __all__ = [
     "Family",
     "Header",
     "ImportResult",
+    "InvalidKeyError",
     "InvalidNameError",
     "KeyStore",
     "KeyStoreError",
@@ -82,5 +85,6 @@ __all__ = [
     "encode",
     "encode_bytes",
     "encrypt",
+    "generate_key",
     "parse_header",
 ]

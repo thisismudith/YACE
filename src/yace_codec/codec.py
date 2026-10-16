@@ -60,6 +60,7 @@ __all__ = [
     "encode",
     "encode_bytes",
     "encrypt",
+    "generate_key",
     "parse_header",
 ]
 
@@ -238,7 +239,7 @@ class Codec:
     def encrypt(
         self,
         data: Union[str, BytesLike],
-        key: Optional[str] = None,
+        key: Union[str, BytesLike, None] = None,
         *,
         token: Optional[sealed.Secret] = None,
         password: Optional[sealed.Secret] = None,
@@ -247,33 +248,34 @@ class Codec:
     ) -> str:
         """Encrypt ``data`` (any text or bytes) into a token of letters and digits.
 
-        ``token`` is your own secret: any non-empty text or bytes. The same
-        ``token`` decrypts the result, and nothing is generated or stored.
-        Without a ``token``, the secret key named ``key`` (default
-        ``"default"``) from the key store is used, and generated on first use.
-        ``password`` is another name for ``token``. The result does not reveal
-        the key name, the exact length, or anything else about the data.
+        Choose the secret with one of:
+
+        - ``token``: your own secret, any non-empty text or bytes (stretched with
+          scrypt). Nothing is generated or stored. ``password`` is another name
+          for it.
+        - ``key`` as 32 bytes: a raw key (see :func:`~yace_codec.generate_key`),
+          used as is. The key store is not used.
+        - ``key`` as a name (default ``"default"``): a key from the key store,
+          generated and saved on first use.
 
         ``aad`` (associated data, bytes or text) is authenticated but not
-        stored; :meth:`decrypt` needs the same value. ``algorithm`` is one of :func:`~yace_codec.algorithms` (default
-        :data:`~yace_codec.DEFAULT_ALGORITHM`, ``"aes-256-gcm"``).
+        stored; :meth:`decrypt` needs the same value. ``algorithm`` is one of
+        :func:`~yace_codec.algorithms` (default
+        :data:`~yace_codec.DEFAULT_ALGORITHM`, ``"aes-256-gcm"``). The result
+        does not reveal the key, the algorithm, the exact length, or anything
+        else about the data.
         """
         secret = _choose_secret(token, password)
         if key is not None and secret is not None:
             raise TypeError("pass either key or token, not both")
-        if isinstance(data, str):
-            try:
-                raw, is_text = data.encode("utf-8"), True
-            except UnicodeEncodeError:
-                raise EncodingError("the text contains characters that are not valid Unicode") from None
-        elif isinstance(data, (bytes, bytearray, memoryview)):
-            raw, is_text = bytes(data), False
-        else:
-            raise TypeError(f"data must be str or bytes-like, not {type(data).__name__}")
+        raw, is_text = _plaintext(data)
         if secret is not None:
             return sealed.seal(raw, text=is_text, secret=secret, aad=aad, algorithm=algorithm)
-        secret = self.keystore.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)
-        return sealed.seal(raw, text=is_text, key=secret, aad=aad, algorithm=algorithm)
+        if isinstance(key, (bytes, bytearray, memoryview)):
+            raw_key = sealed.check_key(key)
+        else:
+            raw_key = self.keystore.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)
+        return sealed.seal(raw, text=is_text, key=raw_key, aad=aad, algorithm=algorithm)
 
     def decrypt(
         self,
@@ -281,31 +283,46 @@ class Codec:
         *,
         token: Optional[sealed.Secret] = None,
         password: Optional[sealed.Secret] = None,
+        keys: Optional[Iterable[BytesLike]] = None,
         aad: sealed.Aad = b"",
         max_age: Optional[float] = None,
     ) -> Union[str, bytes]:
         """Decrypt the output of :meth:`encrypt`.
 
         Returns ``str`` for text and ``bytes`` for bytes, as they were encrypted.
-        Pass the same ``token`` (your secret) and ``aad`` that encrypted it. Without a
-        ``token``, every key in the key store is tried. With
-        ``max_age`` (seconds), older tokens raise
-        :class:`~yace_codec.errors.TokenExpiredError`. A wrong key or token, or
-        any change to the encrypted text, raises
+        Pass the same ``token`` (your secret) and ``aad`` that encrypted it.
+        With ``keys`` (raw 32-byte keys), only those keys are tried. Otherwise
+        every key in the key store is tried. With ``max_age`` (seconds), older
+        tokens raise :class:`~yace_codec.errors.TokenExpiredError`. A wrong key
+        or token, a wrong ``aad``, or any change to the encrypted text, raises
         :class:`~yace_codec.errors.DecryptionError`.
         """
+        data, is_text = sealed.unseal(
+            encrypted, aad=aad, max_age=max_age, **self._decryption_secrets(token, password, keys)
+        )
+        return data.decode("utf-8") if is_text else data
+
+    def _decryption_secrets(
+        self,
+        token: Optional[sealed.Secret],
+        password: Optional[sealed.Secret],
+        keys: Optional[Iterable[BytesLike]],
+    ) -> Dict[str, Any]:
         secret = _choose_secret(token, password)
         if secret is not None:
-            data, is_text = sealed.unseal(encrypted, secret=secret, aad=aad, max_age=max_age)
-        else:
-            keys = [self.keystore.get_key(name) for name in self.keystore.key_names()]
-            data, is_text = sealed.unseal(encrypted, keys=keys, aad=aad, max_age=max_age)
-        return data.decode("utf-8") if is_text else data
+            if keys is not None:
+                raise TypeError("pass either keys or token, not both")
+            return {"secret": secret}
+        if keys is not None:
+            if isinstance(keys, (str, bytes, bytearray, memoryview)):
+                raise TypeError("keys must be a list of 32-byte keys, not a single value")
+            return {"keys": [sealed.check_key(k) for k in keys]}
+        return {"keys": [self.keystore.get_key(name) for name in self.keystore.key_names()]}
 
 
 def encrypt(
     data: Union[str, BytesLike],
-    key: Optional[str] = None,
+    key: Union[str, BytesLike, None] = None,
     *,
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
@@ -315,15 +332,11 @@ def encrypt(
 ) -> str:
     """Encrypt ``data``; shortcut for ``Codec(keystore).encrypt(...)``.
 
-    With a ``token`` (your own secret), the key store is not used at all.
+    With a ``token`` (your own secret) or a raw 32-byte ``key``, the key store
+    is not used at all.
     """
-    if (token is not None or password is not None) and keystore is None and key is None:
-        return Codec(KeyStore.in_memory()).encrypt(
-            data, token=token, password=password, aad=aad, algorithm=algorithm
-        )
-    return Codec(keystore).encrypt(
-        data, key, token=token, password=password, aad=aad, algorithm=algorithm
-    )
+    codec = Codec(KeyStore.in_memory() if _no_store_needed(key, token, password, keystore) else keystore)
+    return codec.encrypt(data, key, token=token, password=password, aad=aad, algorithm=algorithm)
 
 
 def decrypt(
@@ -331,13 +344,47 @@ def decrypt(
     *,
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
+    keys: Optional[Iterable[BytesLike]] = None,
     aad: sealed.Aad = b"",
     max_age: Optional[float] = None,
     keystore: KeyStoreLike = None,
 ) -> Union[str, bytes]:
-    """Decrypt; shortcut for ``Codec(keystore).decrypt(...)``."""
-    codec = Codec(KeyStore.in_memory() if (token is not None or password is not None) and keystore is None else keystore)
-    return codec.decrypt(encrypted, token=token, password=password, aad=aad, max_age=max_age)
+    """Decrypt; shortcut for ``Codec(keystore).decrypt(...)``.
+
+    With a ``token`` or ``keys``, the key store is not used at all.
+    """
+    no_store = keystore is None and (token is not None or password is not None or keys is not None)
+    codec = Codec(KeyStore.in_memory() if no_store else keystore)
+    return codec.decrypt(encrypted, token=token, password=password, keys=keys, aad=aad, max_age=max_age)
+
+
+def generate_key() -> bytes:
+    """Return a new random 32-byte key for ``encrypt(data, key=...)``."""
+    return secrets.token_bytes(sealed.KEY_SIZE)
+
+
+def _no_store_needed(
+    key: Union[str, BytesLike, None],
+    token: Optional[sealed.Secret],
+    password: Optional[sealed.Secret],
+    keystore: KeyStoreLike,
+) -> bool:
+    if keystore is not None:
+        return False
+    if isinstance(key, (bytes, bytearray, memoryview)):
+        return True
+    return key is None and (token is not None or password is not None)
+
+
+def _plaintext(data: Union[str, BytesLike]) -> Tuple[bytes, bool]:
+    if isinstance(data, str):
+        try:
+            return data.encode("utf-8"), True
+        except UnicodeEncodeError:
+            raise EncodingError("the text contains characters that are not valid Unicode") from None
+    if isinstance(data, (bytes, bytearray, memoryview)):
+        return bytes(data), False
+    raise TypeError(f"data must be str or bytes-like, not {type(data).__name__}")
 
 
 def _choose_secret(
