@@ -5,9 +5,9 @@ import io
 import yace_codec as yace
 
 # Your own secret token: nothing is stored.
-secret = yace.encrypt("Meet at the north gate at 06:00.", token="blue-falcon-42")
-print(secret)
-print(yace.decrypt(secret, token="blue-falcon-42"))
+encrypted = yace.encrypt("Meet at the north gate at 06:00.", token="blue-falcon-42")
+print(encrypted)
+print(yace.decrypt(encrypted, token="blue-falcon-42"))
 
 # A raw 32-byte key, bound to a database row with associated data.
 key = yace.generate_key()

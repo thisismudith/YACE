@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "yace-codec"
 dynamic = ["version"]
-description = "YACE (Yet Another Custom Encoder): reversible text encoding with random substitution tables, plus authenticated encryption (AES-256-GCM, ChaCha20-Poly1305) with streaming, associated data, and key backends."
+description = "Authenticated encryption (AES-256-GCM, ChaCha20-Poly1305) with streaming, associated data, and key backends, plus reversible text obfuscation with random substitution tables."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -13,18 +13,18 @@ license-files = ["LICENSE"]
 authors = [{ name = "Mudith Daga" }]
 keywords = [
     "yace",
-    "encoder",
-    "decoder",
-    "encoding",
-    "codec",
-    "substitution",
-    "obfuscation",
     "encryption",
+    "decryption",
+    "authenticated-encryption",
+    "aead",
     "aes-gcm",
     "chacha20-poly1305",
-    "aead",
-    "decryption",
-    "text",
+    "streaming",
+    "keyring",
+    "dpapi",
+    "encoder",
+    "obfuscation",
+    "substitution",
     "cli",
 ]
 classifiers = [
@@ -57,6 +57,8 @@ Homepage = "https://github.com/thisismudith/YACE"
 Source = "https://github.com/thisismudith/YACE"
 Issues = "https://github.com/thisismudith/YACE/issues"
 Changelog = "https://github.com/thisismudith/YACE/blob/main/CHANGELOG.md"
+"Security policy" = "https://github.com/thisismudith/YACE/blob/main/SECURITY.md"
+Documentation = "https://github.com/thisismudith/YACE#readme"
 
 [project.scripts]
 yace-codec = "yace_codec.cli:main"

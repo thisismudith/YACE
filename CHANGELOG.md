@@ -10,62 +10,91 @@ Output of 0.3.0 cannot be decrypted by 0.2.x. Everything 0.2.x made still decryp
 
 ### Added
 
-- **Versioned token format.** Messages (format 3) and streams (format 4) carry a
-  version byte and an algorithm id, authenticated by the tag and hidden with a
-  key-derived mask, so output still has no recognisable prefix. SECURITY.md
-  specifies both formats byte by byte.
+- **Versioned format.** Messages (format 3) and streams (format 4) carry a version
+  byte, an algorithm id, and four check bytes, authenticated by the tag and hidden
+  under a key-derived mask: output still has no recognisable prefix, and a wrong key
+  or secret token is rejected from the header alone. SECURITY.md specifies both
+  formats byte by byte.
 - **Algorithms:** `aes-256-gcm` (the default) and `chacha20-poly1305` from the
-  audited `cryptography` package, and the standard-library `yace-hmac-sha256`.
+  audited `cryptography` package, and the standard-library `yace-hmac-sha256`. Every
+  algorithm has a 16-byte tag, so output length does not reveal the algorithm.
   Choose with `algorithm=` or `--algorithm`; list them with `algorithms()` or
-  `yace-codec algorithms`. Decryption reads the algorithm from the output.
+  `yace-codec algorithms`.
 - **Associated data:** `aad=` (and `--aad`) binds output to a context; a wrong `aad`
   raises `DecryptionError`.
 - **Raw keys:** `encrypt(data, key=<32 bytes>)`, `decrypt(out, keys=[...])`, and
   `generate_key()`, with no key store and no scrypt. Other key sizes raise the new
   `InvalidKeyError`.
-- **Output format:** `output="bytes"` (and `--format bytes`) gives raw binary output
-  with no expansion; `"text"` stays the default. `decrypt()` accepts both.
-- **Streaming:** `encrypt_stream()` and `decrypt_stream()` encrypt files of any size
-  in constant memory, in chunks whose nonces hold the chunk index and a final flag
-  (the STREAM construction), so truncation, reordering, and duplication are
-  detected. Paths are written to a temporary file and renamed only on success.
-  `decrypt()` also reads streams, and `decrypt_stream()` reads every format.
-- **Key backends:** the `KeyBackend` interface, `Codec(key_backend=...)`,
-  `open_key_backend()`, and `--key-backend`. New `DpapiKeyStore` (Windows; keys
-  encrypted with DPAPI through ctypes) and `KeyringKeyStore` (the system keyring;
+- **Output format:** `output="bytes"` (and `--format bytes`) gives raw output with no
+  expansion; `"text"` stays the default. `decrypt()` accepts both.
+- **Streaming:** `encrypt_stream()` and `decrypt_stream()` encrypt files of any size in
+  constant memory, in chunks whose nonces hold the chunk index and a final flag, so
+  truncation, reordering, and duplication are detected. `decrypt()` also reads
+  streams, and `decrypt_stream()` reads every format.
+- **Key backends:** the `KeyBackend` interface, `Codec(key_backend=...)` (an object
+  or a name), `open_key_backend()`, and `--key-backend`; `DpapiKeyStore` (Windows;
+  keys encrypted with DPAPI) and `KeyringKeyStore` (the system keyring;
   `pip install "yace-codec[keyring]"`).
-- **Key rotation:** `rotate_key()` and `yace-codec keys rotate` keep the previous
-  key for decryption; `delete_key()` and `yace-codec keys delete --yes` remove one.
-- **Command line:** `--token-file PATH` and `--token-stdin`; `encrypt`/`decrypt`
-  stream files in constant memory and only replace `-o` files on success.
-- `SECURITY.md` with the threat model, the format specification, supported
-  versions, and private vulnerability reporting.
-- The test suite ships in the sdist and runs in CI on Linux, Windows, and macOS: test
-  vectors for every algorithm and format (`tests/vectors/`), an independent
-  implementation that decrypts them, hypothesis property tests, tamper, stream, and
-  legacy tests. `benchmarks/bench.py` reports throughput.
+- **Key rotation and deletion:** `rotate_key()` / `yace-codec keys rotate` keep the
+  previous key for decryption; `delete_key()` / `yace-codec keys delete --yes`.
+- **Command line:** `--token-file PATH` and `--token-stdin`; `encrypt` and `decrypt`
+  stream files in constant memory (`encrypt` always writes the stream format).
+- New names: `DEFAULT_ALGORITHM`, `DEFAULT_CHUNK_SIZE`, `KEY_SIZE`,
+  `MAX_MESSAGE_SIZE`, `AlgorithmInfo`, `StreamInfo`, `KeyBackend`,
+  `KeyNotFoundError`, and the `Codec.key_backend` attribute.
+- `SECURITY.md` with the threat model, the format specification, supported versions,
+  and how to report a vulnerability privately.
+- The test suite ships in the sdist and runs in CI on Linux, Windows, and macOS for
+  Python 3.10–3.15, against the built wheel and the oldest supported dependencies:
+  test vectors for every algorithm and format (`tests/vectors/`), an independent
+  implementation that decrypts them, property tests, and tamper, stream, concurrency,
+  and legacy tests. `benchmarks/bench.py` reports throughput.
 
 ### Changed
 
-- **The default algorithm is now `aes-256-gcm`**, and `cryptography` is a
-  dependency. (0.2.x used what is now `yace-hmac-sha256`.)
+- **The default algorithm is now `aes-256-gcm`**, and `cryptography` is a dependency.
+  (0.2.x used an HMAC-SHA256 construction; it remains available as
+  `yace-hmac-sha256`.)
 - Python 3.10 or newer is required (3.9 reached end of life in October 2025).
-- New key store files are readable only by their owner on Windows too (an access
-  control list for you and SYSTEM, with nothing inherited).
-- Key entries can hold a `retired` list after rotation; 0.2.x ignores it and keeps
-  using the current key.
-- YACE62 text encoding is about twice as fast.
+- Every bad argument raises a `YaceError` subclass (or `TypeError`), and every
+  argument is checked before a stored key is created.
+- Command line:
+  - every `-o` writes a temporary file that replaces the target only on success;
+  - decrypted and decoded files, and exported keys and tables, are created readable
+    only by you;
+  - usage mistakes (bad `--max-age`, `-l`, `-i`, or `--key`, and conflicting inputs)
+    exit with status 2;
+  - abbreviated option names are no longer accepted;
+  - `--token-file` reads UTF-16 files with a byte order mark (PowerShell);
+  - `--token` fails at once without a terminal;
+  - `keys rotate` refuses a key that does not exist;
+  - with `--key-backend dpapi`, `-k` names the key store and the keys go in
+    `keys-dpapi.json` next to it.
+- New key store files are readable only by their owner on Windows too (an
+  access control list for you and SYSTEM, with nothing inherited).
+- Stored keys can have a `retired` list after rotation. Version 0.2 ignores it, so
+  after a rotation 0.2 can no longer decrypt data made with the old key.
+- Text output encodes about twice as fast.
+
+### Fixed
+
+- Readers no longer see an empty key store while another process replaces it on
+  Windows.
+- A damaged key entry no longer blocks decryption with the other keys.
+- `decode()` rejects tokens longer than the encoder can make, instead of using
+  gigabytes of memory.
 
 ### Deprecated
 
-- The `YACE_CODEC_TOKEN` and `YACE_CODEC_PASSWORD` environment variables: they still
-  work with `--token`, but print a warning and raise `DeprecationWarning`. Use the
-  prompt, `--token-file`, or `--token-stdin`.
+- The `YACE_CODEC_TOKEN` and `YACE_CODEC_PASSWORD` environment variables still work
+  with `--token`, but print a warning. Use the prompt, `--token-file`, or
+  `--token-stdin`.
 
 ### Security
 
-- Releases are built with hash-pinned build tools and actions pinned to commits, and
-  publish build provenance attestations.
+- Releases publish only after the full test suite passes. They are built with
+  hash-pinned tools and actions pinned to commits, reproducibly, and publish build
+  provenance attestations.
 
 ## [0.2.1] - 2026-10-15
 
@@ -175,3 +204,8 @@ First release on PyPI, as `yace-codec` (import name `yace_codec`).
 - The deprecated `encoder (beta).py` and the unfinished `analyzer.py` file encoder
   (use `yace-codec encode FILE` or `--binary` instead).
 - Scratch files unrelated to the encoder, and compiled `__pycache__` files.
+
+[0.3.0]: https://github.com/thisismudith/YACE/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/thisismudith/YACE/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/thisismudith/YACE/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/thisismudith/YACE/releases/tag/v0.1.0
