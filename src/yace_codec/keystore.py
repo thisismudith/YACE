@@ -1,9 +1,10 @@
-"""Persistent storage for substitution tables.
+"""The key store: a JSON file of substitution tables and secret keys.
 
-A key store is a JSON file in the format of the original ``encodings.json``.
-Every token depends on the tables in it, so treat the file like a key: back it
-up, and share it (or a single family, see :meth:`KeyStore.export_family`) only
-with people who should be able to decode your tokens.
+Tables use the format of the original ``encodings.json``; secret keys for
+``encrypt()`` are ``"key:<name>"`` entries, stored in plain text (base64).
+Anyone who reads the file can decode your tokens and decrypt your data, so
+treat it like a key: keep it private, back it up, and share single families
+(:meth:`KeyStore.export_family`) or keys (:meth:`KeyStore.export_key`) only.
 
 Writes are atomic (temporary file, then rename) and serialised through a
 ``<keystore>.lock`` file, so concurrent processes never lose each other's tables.
@@ -92,7 +93,7 @@ class Family(NamedTuple):
 
 
 class ImportResult(NamedTuple):
-    """Table names affected by :meth:`KeyStore.import_tables`."""
+    """Entries affected by :meth:`KeyStore.import_tables` or :meth:`KeyStore.import_keys`."""
 
     added: Tuple[str, ...]
     unchanged: Tuple[str, ...]
@@ -100,12 +101,13 @@ class ImportResult(NamedTuple):
 
 
 class KeyStore:
-    """Substitution tables kept in a JSON file, or in memory (:meth:`in_memory`).
+    """Substitution tables and secret keys in a JSON file, or in memory (:meth:`in_memory`).
 
     A relative ``path`` is resolved against the current directory when the
-    store is created. The file is created on the first write and re-read
-    whenever it changes on disk, so tables added by other processes become
-    visible.
+    store is created. The file is created on the first write (readable only by
+    its owner) and re-read whenever it changes on disk, so tables and keys added
+    by other processes become visible. ``KeyStore`` is also the default
+    :class:`~yace_codec.keybackends.KeyBackend`; its keys are plain text.
     """
 
     def __init__(self, path: PathLike) -> None:
@@ -360,7 +362,7 @@ class KeyStore:
         exists with a different value is only replaced when ``overwrite`` is
         true, because tokens made with the old key could no longer be opened.
         """
-        incoming = parse_key_entries(keys, name)
+        incoming = _parse_key_entries(keys, name)
         return self._import(
             incoming, overwrite, self._normalised_key, "key",
             lambda entry, value: self._encode_record(_parse_key_record(entry, value)),
@@ -590,7 +592,7 @@ def _decode_secret(entry: str, value: Any) -> bytes:
     return secret
 
 
-def parse_key_entries(keys: Mapping[str, Any], name: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+def _parse_key_entries(keys: Mapping[str, Any], name: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
     """Validate exported key entries (``{"key:<name>": {...}}``); return them normalised."""
     if not isinstance(keys, Mapping):
         raise KeyStoreError("expected a JSON object that maps key entries to keys")

@@ -43,7 +43,7 @@ from .keystore import (
     _plan_import,
     _usable_keys,
     default_keystore_path,
-    parse_key_entries,
+    _parse_key_entries,
     validate_key_name,
 )
 from .sealed import KEY_SIZE
@@ -296,7 +296,7 @@ class KeyringKeyStore:
     def import_keys(
         self, keys: Mapping[str, Any], *, overwrite: bool = False, name: Optional[str] = None
     ) -> ImportResult:
-        incoming = parse_key_entries(keys, name)
+        incoming = _parse_key_entries(keys, name)
         with self._locked():
             # Look every incoming key up directly: the index may have missed one.
             current = {

@@ -46,7 +46,7 @@ from .errors import (
     UnsupportedCharacterError,
     YaceError,
 )
-from .sealed import StreamInfo
+from .sealed import DEFAULT_CHUNK_SIZE, KEY_SIZE, MAX_MESSAGE_SIZE, StreamInfo
 from .keybackends import DpapiKeyStore, KeyBackend, KeyringKeyStore, open_key_backend
 from .keystore import ENV_VAR, Family, ImportResult, KeyStore, default_keystore_path
 from .tables import MAX_LENGTH, MIN_LENGTH, SUPPORTED_CHARACTERS, Table
@@ -55,21 +55,24 @@ __version__ = "0.3.0"
 
 __all__ = [
     "DEFAULT_ALGORITHM",
+    "DEFAULT_CHUNK_SIZE",
     "DEFAULT_FAMILY",
     "DEFAULT_ITERATIONS",
     "DEFAULT_KEY",
     "DEFAULT_LENGTH",
     "ENV_VAR",
+    "KEY_SIZE",
     "MAX_ENCODED_CHARS",
     "MAX_ITERATIONS",
     "MAX_LENGTH",
+    "MAX_MESSAGE_SIZE",
     "MIN_LENGTH",
     "SUPPORTED_CHARACTERS",
     "AlgorithmInfo",
     "Codec",
-    "DpapiKeyStore",
     "DecodingError",
     "DecryptionError",
+    "DpapiKeyStore",
     "EncodingError",
     "Family",
     "Header",

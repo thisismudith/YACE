@@ -214,17 +214,17 @@ class _Aead(_Algorithm):
 _ALGORITHMS: List[_Algorithm] = [
     _Aead(
         "aes-256-gcm", 2,
-        "AES-256 in GCM mode (needs the cryptography package)",
+        "AES-256-GCM from the audited cryptography package",
         "AESGCM",
     ),
     _Aead(
         "chacha20-poly1305", 3,
-        "ChaCha20-Poly1305 (fast without AES hardware; needs the cryptography package)",
+        "ChaCha20-Poly1305 from cryptography; fast without AES hardware",
         "ChaCha20Poly1305",
     ),
     _Hmac(
         "yace-hmac-sha256", 1, 16,
-        "HMAC-SHA256 keystream and tag (standard library only; slower, not audited)",
+        "HMAC-SHA256 keystream and tag; standard library only, slower",
     ),
 ]
 _BY_NAME: Dict[str, _Algorithm] = {alg.name: alg for alg in _ALGORITHMS}
