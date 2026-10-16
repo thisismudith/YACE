@@ -13,8 +13,8 @@ from yace_codec import sealed
 
 KEY = bytes(range(32))
 ALGORITHMS = ["aes-256-gcm", "chacha20-poly1305", "yace-hmac-sha256"]
-TAGS = {"aes-256-gcm": 16, "chacha20-poly1305": 16, "yace-hmac-sha256": 32}
-HEADER = 16 + 3
+TAGS = {"aes-256-gcm": 16, "chacha20-poly1305": 16, "yace-hmac-sha256": 16}
+HEADER = 16 + 3 + 4
 
 
 @pytest.fixture(autouse=True)
@@ -158,7 +158,7 @@ def test_every_header_byte_is_authenticated(algorithm):
 
 def test_smallest_stream_decrypts():
     token = encrypt(b"", chunk_size=64)
-    assert len(token) == 49
+    assert len(token) == 53
     assert decrypt(token) == b"" and yace.decrypt(token, keys=[KEY]) == b""
 
 

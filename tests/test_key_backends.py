@@ -155,7 +155,7 @@ def test_dpapi_is_windows_only(tmp_path):
 def test_open_key_backend(tmp_path, memory_keyring):
     assert isinstance(yace.open_key_backend("json", path=tmp_path / "a.json"), yace.KeyStore)
     assert isinstance(yace.open_key_backend("keyring"), yace.KeyringKeyStore)
-    with pytest.raises(ValueError, match="json, dpapi, keyring"):
+    with pytest.raises(yace.KeyStoreError, match="json, dpapi, keyring"):
         yace.open_key_backend("vault")
 
 

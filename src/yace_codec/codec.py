@@ -27,7 +27,6 @@ import binascii
 import contextlib
 import os
 import secrets
-import tempfile
 from random import Random
 from typing import (
     Any,
@@ -45,10 +44,11 @@ from typing import (
     overload,
 )
 
-from . import sealed
+from . import _algorithms, sealed
+from ._files import Access, atomic_output
 from ._text import TokenLike, token_text
 from .errors import DecodingError, DecryptionError, EncodingError, UnsupportedCharacterError
-from .keybackends import KeyBackend
+from .keybackends import BACKENDS, KeyBackend, open_key_backend
 from .keystore import KeyStore
 from .tables import (
     CODE_ALPHABET,
@@ -98,10 +98,13 @@ MAX_ITERATIONS = 32
 MAX_ENCODED_CHARS = 2**25
 
 _CODE_CHARS = frozenset(CODE_ALPHABET)
+# The longest token body: every character encoded, plus 25% bins (rounded up).
+_MAX_TOKEN_CHARS = MAX_ENCODED_CHARS + (MAX_ENCODED_CHARS // MIN_LENGTH // 4 + 1) * MAX_LENGTH
 _SYSTEM_RANDOM = secrets.SystemRandom()
 
 KeyStoreLike = Union[KeyStore, str, "os.PathLike[str]", None]
 PathLike = Union[str, "os.PathLike[str]"]
+KeyBackendLike = Union[KeyBackend, str, None]
 BytesLike = Union[bytes, bytearray, memoryview]
 
 
@@ -128,8 +131,9 @@ class Codec:
     key store file, or ``None`` for the default key store
     (:func:`~yace_codec.keystore.default_keystore_path`).
 
-    ``key_backend`` keeps the secret keys for :meth:`encrypt` elsewhere (see
-    :mod:`yace_codec.keybackends`); by default they live in ``keystore``.
+    ``key_backend`` keeps the secret keys for :meth:`encrypt` elsewhere: a
+    :class:`~yace_codec.keybackends.KeyBackend`, or the name ``"json"`` (the
+    key store, the default), ``"dpapi"``, or ``"keyring"``.
 
     ``rng`` replaces the operating system's random source for new tables and
     for the per-token randomness. Pass a seeded :class:`random.Random` only to
@@ -141,17 +145,17 @@ class Codec:
         keystore: KeyStoreLike = None,
         *,
         rng: Optional[Random] = None,
-        key_backend: Optional[KeyBackend] = None,
+        key_backend: KeyBackendLike = None,
     ) -> None:
         self.keystore = _as_keystore(keystore)
         #: Where secret keys for encrypt()/decrypt() live (default: the key store).
-        self.keys: KeyBackend = self.keystore if key_backend is None else key_backend
+        self.key_backend: KeyBackend = _as_key_backend(key_backend, self.keystore)
         self._rng = rng
 
     def __repr__(self) -> str:
-        if self.keys is self.keystore:
+        if self.key_backend is self.keystore:
             return f"Codec({self.keystore!r})"
-        return f"Codec({self.keystore!r}, key_backend={self.keys!r})"
+        return f"Codec({self.keystore!r}, key_backend={self.key_backend!r})"
 
     def encode(
         self,
@@ -305,7 +309,7 @@ class Codec:
         password: Optional[sealed.Secret] = None,
         aad: sealed.Aad = b"",
         algorithm: Optional[str] = None,
-        output: str,
+        output: sealed.Output,
     ) -> Union[str, bytes]: ...
 
     def encrypt(
@@ -317,9 +321,9 @@ class Codec:
         password: Optional[sealed.Secret] = None,
         aad: sealed.Aad = b"",
         algorithm: Optional[str] = None,
-        output: str = "text",
+        output: sealed.Output = "text",
     ) -> Union[str, bytes]:
-        """Encrypt ``data`` (any text or bytes) into a token of letters and digits.
+        """Encrypt ``data`` (any text or bytes).
 
         Choose the secret with one of:
 
@@ -327,23 +331,23 @@ class Codec:
           scrypt). Nothing is generated or stored. ``password`` is another name
           for it.
         - ``key`` as 32 bytes: a raw key (see :func:`~yace_codec.generate_key`),
-          used as is. The key store is not used.
-        - ``key`` as a name (default ``"default"``): a key from the key store,
-          generated and saved on first use.
+          used as is. No key backend is used.
+        - ``key`` as a name (default ``"default"``): a stored key from the key
+          backend, generated and saved on first use. Key names are 1-64 ASCII
+          letters or underscores.
 
         ``aad`` (associated data, bytes or text) is authenticated but not
         stored; :meth:`decrypt` needs the same value. ``algorithm`` is one of
         :func:`~yace_codec.algorithms` (default
-        :data:`~yace_codec.DEFAULT_ALGORITHM`, ``"aes-256-gcm"``). The result
-        does not reveal the key, the algorithm, the exact length, or anything
-        else about the data.
-
-        ``output="text"`` (the default) returns YACE62 letters and digits;
-        ``output="bytes"`` returns the raw binary token, with no expansion.
-        :meth:`decrypt` accepts both.
+        :data:`~yace_codec.DEFAULT_ALGORITHM`, ``"aes-256-gcm"``).
+        ``output="text"`` (the default) returns letters and digits;
+        ``output="bytes"`` returns raw bytes, with no expansion. The result does
+        not reveal the key, the algorithm, the exact length, or anything else
+        about the data. Every argument is checked before a key is created.
         """
-        secrets_ = self._encryption_secret(key, token, password)
         raw, is_text = _plaintext(data)
+        _check_encryption_options(aad, algorithm, output)
+        secrets_ = self._encryption_secret(key, token, password)
         return sealed.seal(raw, text=is_text, aad=aad, algorithm=algorithm, output=output, **secrets_)
 
     def decrypt(
@@ -356,14 +360,17 @@ class Codec:
         aad: sealed.Aad = b"",
         max_age: Optional[float] = None,
     ) -> Union[str, bytes]:
-        """Decrypt the output of :meth:`encrypt`.
+        """Decrypt the output of :meth:`encrypt` or :meth:`encrypt_stream`.
 
         Returns ``str`` for text and ``bytes`` for bytes, as they were encrypted.
         Pass the same ``token`` (your secret) and ``aad`` that encrypted it.
         With ``keys`` (raw 32-byte keys), only those keys are tried. Otherwise
-        every key in the key store is tried. With ``max_age`` (seconds), older
-        tokens raise :class:`~yace_codec.errors.TokenExpiredError`. A wrong key
-        or token, a wrong ``aad``, or any change to the encrypted text, raises
+        every current and retired key of the key backend is tried. With
+        ``max_age`` (seconds), older output raises
+        :class:`~yace_codec.errors.TokenExpiredError`.
+
+        Every failure raises :class:`~yace_codec.errors.DecodingError`: a wrong
+        secret or ``aad``, or changed data, raises its subclass
         :class:`~yace_codec.errors.DecryptionError`.
         """
         data, is_text = sealed.unseal(
@@ -386,20 +393,21 @@ class Codec:
         password: Optional[sealed.Secret] = None,
         aad: sealed.Aad = b"",
         algorithm: Optional[str] = None,
-        output: str = "text",
+        output: sealed.Output = "text",
         text: bool = False,
         chunk_size: int = sealed.DEFAULT_CHUNK_SIZE,
     ) -> int:
         """Encrypt a file or binary stream in constant memory; return the bytes written.
 
         ``src`` and ``dst`` are binary file objects or paths. A ``dst`` path is
-        written to a temporary file first and only renamed into place when
+        written to a temporary file first and only replaces ``dst`` when
         encryption succeeds. The secret, ``aad``, ``algorithm``, and ``output``
         work as in :meth:`encrypt` (use ``output="bytes"`` for large files).
-        ``text=True`` makes :meth:`decrypt` return ``str``.
+        ``text=True`` requires UTF-8 data and makes :meth:`decrypt` return ``str``.
         """
+        _check_encryption_options(aad, algorithm, output, chunk_size)
         secrets_ = self._encryption_secret(key, token, password)
-        with _opened(src, "rb") as reader, _opened(dst, "wb") as writer:
+        with _opened(src) as reader, _written(dst, "normal") as writer:
             return sealed.seal_stream(
                 reader, writer, text=text, aad=aad, algorithm=algorithm, output=output,
                 chunk_size=chunk_size, **secrets_,
@@ -416,16 +424,16 @@ class Codec:
         aad: sealed.Aad = b"",
         max_age: Optional[float] = None,
     ) -> sealed.StreamInfo:
-        """Decrypt a file or binary stream (any token format) into ``dst``.
+        """Decrypt a file or binary stream (any format, text or bytes) into ``dst``.
 
-        Stream tokens are decrypted in constant memory. Every chunk is verified
-        before it is written, but a truncated or changed stream is only detected
-        when the damaged chunk is reached: if this raises, discard what was
-        written. A ``dst`` path is written to a temporary file and only renamed
-        into place when decryption succeeds, so it is never left incomplete.
+        Streams are decrypted in constant memory. Every chunk is verified before
+        it is written, but a truncated or changed stream is only detected when
+        the damaged chunk is reached: if this raises, discard what was written
+        to a file object. A ``dst`` path is written to a temporary file that only
+        replaces ``dst`` (readable only by you, if it is new) on success.
         """
         secrets_ = self._decryption_secrets(token, password, keys)
-        with _opened(src, "rb") as reader, _opened(dst, "wb") as writer:
+        with _opened(src) as reader, _written(dst, "private") as writer:
             return sealed.unseal_stream(reader, writer, aad=aad, max_age=max_age, **secrets_)
 
     def _encryption_secret(
@@ -441,7 +449,9 @@ class Codec:
             return {"secret": secret}
         if isinstance(key, (bytes, bytearray, memoryview)):
             return {"key": sealed.check_key(key)}
-        return {"key": self.keys.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)}
+        if key is not None and not isinstance(key, str):
+            raise TypeError(f"key must be a key name (str) or 32 bytes, not {type(key).__name__}")
+        return {"key": self.key_backend.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)}
 
     def _decryption_secrets(
         self,
@@ -458,7 +468,7 @@ class Codec:
             if isinstance(keys, (str, bytes, bytearray, memoryview)):
                 raise TypeError("keys must be a list of 32-byte keys, not a single value")
             return {"keys": [sealed.check_key(k) for k in keys]}
-        return {"keys": self.keys.decryption_keys()}
+        return {"keys": self.key_backend.decryption_keys()}
 
 
 @overload
@@ -469,12 +479,13 @@ def encrypt(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
-    key_backend: Optional[KeyBackend] = None,
+    key_backend: KeyBackendLike = None,
     aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
     output: Literal["text"] = "text",
 ) -> str: ...
 
+
 @overload
 def encrypt(
     data: Union[str, BytesLike],
@@ -483,12 +494,13 @@ def encrypt(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
-    key_backend: Optional[KeyBackend] = None,
+    key_backend: KeyBackendLike = None,
     aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
     output: Literal["bytes"],
 ) -> bytes: ...
 
+
 @overload
 def encrypt(
     data: Union[str, BytesLike],
@@ -497,11 +509,12 @@ def encrypt(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
-    key_backend: Optional[KeyBackend] = None,
+    key_backend: KeyBackendLike = None,
     aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
-    output: str,
+    output: sealed.Output,
 ) -> Union[str, bytes]: ...
+
 
 def encrypt(
     data: Union[str, BytesLike],
@@ -510,21 +523,17 @@ def encrypt(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
-    key_backend: Optional[KeyBackend] = None,
+    key_backend: KeyBackendLike = None,
     aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
-    output: str = "text",
+    output: sealed.Output = "text",
 ) -> Union[str, bytes]:
     """Encrypt ``data``; shortcut for ``Codec(keystore).encrypt(...)``.
 
-    With a ``token`` (your own secret) or a raw 32-byte ``key``, the key store
-    is not used at all.
+    With a ``token`` (your own secret) or a raw 32-byte ``key``, no key store
+    or key backend is used at all.
     """
-    codec = Codec(
-        KeyStore.in_memory() if _no_store_needed(key, token, password, keystore) else keystore,
-        key_backend=key_backend,
-    )
-    return codec.encrypt(
+    return _codec_for(keystore, key_backend, _key_free(key, token, password)).encrypt(
         data, key, token=token, password=password, aad=aad, algorithm=algorithm, output=output
     )
 
@@ -538,15 +547,16 @@ def decrypt(
     aad: sealed.Aad = b"",
     max_age: Optional[float] = None,
     keystore: KeyStoreLike = None,
-    key_backend: Optional[KeyBackend] = None,
+    key_backend: KeyBackendLike = None,
 ) -> Union[str, bytes]:
     """Decrypt; shortcut for ``Codec(keystore).decrypt(...)``.
 
-    With a ``token`` or ``keys``, the key store is not used at all.
+    With a ``token`` or ``keys``, no key store or key backend is used at all.
     """
-    no_store = keystore is None and (token is not None or password is not None or keys is not None)
-    codec = Codec(KeyStore.in_memory() if no_store else keystore, key_backend=key_backend)
-    return codec.decrypt(encrypted, token=token, password=password, keys=keys, aad=aad, max_age=max_age)
+    key_free = token is not None or password is not None or keys is not None
+    return _codec_for(keystore, key_backend, key_free).decrypt(
+        encrypted, token=token, password=password, keys=keys, aad=aad, max_age=max_age
+    )
 
 
 def encrypt_stream(
@@ -557,19 +567,15 @@ def encrypt_stream(
     token: Optional[sealed.Secret] = None,
     password: Optional[sealed.Secret] = None,
     keystore: KeyStoreLike = None,
-    key_backend: Optional[KeyBackend] = None,
+    key_backend: KeyBackendLike = None,
     aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
-    output: str = "text",
+    output: sealed.Output = "text",
     text: bool = False,
     chunk_size: int = sealed.DEFAULT_CHUNK_SIZE,
 ) -> int:
     """Encrypt a stream; shortcut for ``Codec(keystore).encrypt_stream(...)``."""
-    codec = Codec(
-        KeyStore.in_memory() if _no_store_needed(key, token, password, keystore) else keystore,
-        key_backend=key_backend,
-    )
-    return codec.encrypt_stream(
+    return _codec_for(keystore, key_backend, _key_free(key, token, password)).encrypt_stream(
         src, dst, key, token=token, password=password, aad=aad, algorithm=algorithm,
         output=output, text=text, chunk_size=chunk_size,
     )
@@ -585,41 +591,13 @@ def decrypt_stream(
     aad: sealed.Aad = b"",
     max_age: Optional[float] = None,
     keystore: KeyStoreLike = None,
-    key_backend: Optional[KeyBackend] = None,
+    key_backend: KeyBackendLike = None,
 ) -> sealed.StreamInfo:
     """Decrypt a stream; shortcut for ``Codec(keystore).decrypt_stream(...)``."""
-    no_store = keystore is None and (token is not None or password is not None or keys is not None)
-    codec = Codec(KeyStore.in_memory() if no_store else keystore, key_backend=key_backend)
-    return codec.decrypt_stream(
+    key_free = token is not None or password is not None or keys is not None
+    return _codec_for(keystore, key_backend, key_free).decrypt_stream(
         src, dst, token=token, password=password, keys=keys, aad=aad, max_age=max_age
     )
-
-
-@contextlib.contextmanager
-def _opened(target: Union[BinaryIO, PathLike], mode: str) -> Iterator[BinaryIO]:
-    """Yield ``target`` itself, or a file opened at that path.
-
-    Output paths are written to a temporary file next to them and renamed into
-    place only if the block succeeds.
-    """
-    if not isinstance(target, (str, os.PathLike)):
-        yield target
-        return
-    path = os.fspath(target)
-    if mode == "rb":
-        with open(path, "rb") as fh:
-            yield fh
-        return
-    directory, name = os.path.split(os.path.abspath(path))
-    fd, tmp = tempfile.mkstemp(prefix=f".{name}.", suffix=".part", dir=directory)
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            yield fh
-        os.replace(tmp, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
 
 
 def generate_key() -> bytes:
@@ -627,17 +605,63 @@ def generate_key() -> bytes:
     return secrets.token_bytes(sealed.KEY_SIZE)
 
 
-def _no_store_needed(
-    key: Union[str, BytesLike, None],
-    token: Optional[sealed.Secret],
-    password: Optional[sealed.Secret],
-    keystore: KeyStoreLike,
+def _codec_for(keystore: KeyStoreLike, key_backend: KeyBackendLike, key_free: bool) -> Codec:
+    """A Codec for the module functions; key-free calls never open the default store."""
+    if key_free and keystore is None and key_backend is None:
+        return Codec(KeyStore.in_memory())
+    return Codec(keystore, key_backend=key_backend)
+
+
+def _key_free(
+    key: Union[str, BytesLike, None], token: Optional[sealed.Secret], password: Optional[sealed.Secret]
 ) -> bool:
-    if keystore is not None:
-        return False
     if isinstance(key, (bytes, bytearray, memoryview)):
         return True
     return key is None and (token is not None or password is not None)
+
+
+def _check_encryption_options(
+    aad: sealed.Aad, algorithm: Optional[str], output: object, chunk_size: Optional[int] = None
+) -> None:
+    """Raise for bad options before anything (such as a new key) is saved."""
+    sealed._wants_text(output)
+    _algorithms.by_name(algorithm)
+    sealed._aad_block(aad)
+    if chunk_size is not None:
+        sealed._chunk_log2(chunk_size)
+
+
+@contextlib.contextmanager
+def _opened(source: Union[BinaryIO, PathLike]) -> Iterator[BinaryIO]:
+    """Yield ``source`` itself, or the file at that path opened for binary reading."""
+    if isinstance(source, (str, os.PathLike)):
+        with open(source, "rb") as fh:
+            yield fh
+    else:
+        yield source
+
+
+@contextlib.contextmanager
+def _written(target: Union[BinaryIO, PathLike], access: Access) -> Iterator[BinaryIO]:
+    """Yield ``target`` itself, or a file that replaces that path only on success."""
+    if isinstance(target, (str, os.PathLike)):
+        with atomic_output(target, access) as fh:
+            yield fh
+    else:
+        yield target
+
+
+def _as_key_backend(key_backend: KeyBackendLike, keystore: KeyStore) -> KeyBackend:
+    if key_backend is None or key_backend == "json":
+        return keystore
+    if isinstance(key_backend, str):
+        return open_key_backend(key_backend)
+    if not isinstance(key_backend, KeyBackend):
+        raise TypeError(
+            f"key_backend must be a KeyBackend or one of {', '.join(BACKENDS)}, "
+            f"not {type(key_backend).__name__}"
+        )
+    return key_backend
 
 
 def _plaintext(data: Union[str, BytesLike]) -> Tuple[bytes, bool]:
@@ -903,6 +927,8 @@ def _split_token(token: TokenLike) -> Tuple[Header, str]:
     if not MIN_LENGTH <= length <= MAX_LENGTH or iterations < 1:
         raise DecodingError(f"invalid header {head!r}: unsupported length or iteration count")
     body = "".join(body.split())
+    if len(body) > _MAX_TOKEN_CHARS:
+        raise DecodingError("the token is longer than any token the encoder makes")
     if not _CODE_CHARS.issuperset(body):
         bad = sorted(set(body) - _CODE_CHARS)[:5]
         raise DecodingError(

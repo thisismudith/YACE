@@ -161,7 +161,7 @@ def test_keyring_survives_many_rotations(memory_keyring):
     exported = store.export_key("team")["key:team"]
     assert len(exported["retired"]) == 60 and exported["retired"][0] != exported["secret"]
     store.delete_key("team")
-    assert memory_keyring.data == {("rot", "__yace_codec_key_names__"): "[]"}
+    assert memory_keyring.data == {("rot", "__yace_codec_key_names__:0"): "[]"}
 
 
 def test_keyring_backend_errors_become_key_store_errors(memory_keyring, monkeypatch):

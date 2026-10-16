@@ -32,7 +32,7 @@ def test_algorithms_are_listed_with_an_explicit_default():
     assert [name for name, info in infos.items() if info.default] == ["aes-256-gcm"]
     assert {info.id for info in infos.values()} == {1, 2, 3}
     assert all(info.available for info in infos.values())
-    assert infos["aes-256-gcm"].tag_size == 16 and infos["yace-hmac-sha256"].tag_size == 32
+    assert {info.tag_size for info in infos.values()} == {16}  # lengths do not reveal the algorithm
 
 
 @pytest.mark.parametrize("algorithm", ALGORITHMS)
@@ -117,7 +117,7 @@ def test_new_tokens_are_not_legacy_tokens():
     token = sealed.seal(b"new", text=True, key=KEY)
     assert not token.startswith("yace2_")
     raw = sealed.yace62_decode(token)
-    assert len(raw) == 16 + 2 + sealed.padme(17 + 3) + 16
+    assert len(raw) == 16 + 6 + sealed.padme(17 + 3) + 16
 
 
 def test_max_age_still_works():

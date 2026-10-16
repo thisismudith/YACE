@@ -23,12 +23,13 @@ import sys
 import tempfile
 import threading
 import time
+import warnings
 from pathlib import Path
 from random import Random
 from typing import Any, Callable, Dict, Iterator, List, Mapping, NamedTuple, Optional, Tuple, Union
 
 from ._winsec import restrict_to_owner
-from .errors import KeyStoreError, TableNotFoundError, YaceError
+from .errors import InvalidNameError, KeyNotFoundError, KeyStoreError, TableNotFoundError, YaceError
 from .sealed import KEY_SIZE
 from .tables import Table, parse_table_name, table_name, validate_family
 
@@ -140,8 +141,9 @@ class KeyStore:
         return f"KeyStore({str(self._path)!r})"
 
     def __contains__(self, name: object) -> bool:
+        """Whether table ``name`` is stored (secret keys do not count)."""
         with self._lock:
-            return name in self._loaded()
+            return isinstance(name, str) and not _is_key_entry(name) and name in self._loaded()
 
     def __len__(self) -> int:
         return len(self.table_names())
@@ -170,6 +172,8 @@ class KeyStore:
         Raises :class:`~yace_codec.errors.KeyStoreError` if the stored table is
         malformed.
         """
+        if _is_key_entry(name):
+            return None
         with self._lock:
             data = self._loaded()
             table = self._cache.get(name)
@@ -279,15 +283,20 @@ class KeyStore:
         """Return the secret key ``name``; raise TableNotFoundError if it is missing."""
         key = self.find_key(name)
         if key is None:
-            raise TableNotFoundError(f"key {name!r} is not in {self._describe()}", name)
+            raise KeyNotFoundError(f"key {name!r} is not in {self._describe()}", name)
         return key
 
     def decryption_keys(self) -> List[bytes]:
-        """Return every key that may open a token: current keys first, then retired ones."""
+        """Return every key that may decrypt: current keys first, then retired ones.
+
+        An entry that cannot be read (damaged, or written by another backend) is
+        skipped with a warning, so it does not block the others; if no entry can
+        be read, its error is raised.
+        """
         with self._lock:
             data = self._loaded()
-            records = [self._decode_record(entry, data[entry]) for entry in sorted(data) if _is_key_entry(entry)]
-        return [record.current for record in records] + [key for record in records for key in record.retired]
+            entries = [(entry, data[entry]) for entry in sorted(data) if _is_key_entry(entry)]
+        return _usable_keys(entries, self._decode_record)
 
     def ensure_key(self, name: str, *, rng: Optional[Random] = None) -> bytes:
         """Return the secret key ``name``, generating and saving it if it is missing.
@@ -295,7 +304,7 @@ class KeyStore:
         Keys come from the operating system's cryptographic random source
         unless ``rng`` is given (for reproducible tests only).
         """
-        validate_family(name)
+        validate_key_name(name)
         entry = _KEY_PREFIX + name
         with self._lock:
             if entry not in self._loaded():
@@ -311,7 +320,7 @@ class KeyStore:
         returns it, so older tokens keep decrypting, but new tokens use the new
         key. A missing key is created.
         """
-        validate_family(name)
+        validate_key_name(name)
         entry = _KEY_PREFIX + name
         key = _new_key(rng)
         with self._lock, self._editing() as data:
@@ -325,7 +334,7 @@ class KeyStore:
         entry = _KEY_PREFIX + name
         with self._lock:
             if entry not in self._loaded():
-                raise TableNotFoundError(f"key {name!r} is not in {self._describe()}", name)
+                raise KeyNotFoundError(f"key {name!r} is not in {self._describe()}", name)
             with self._editing() as data:
                 data.pop(entry, None)
 
@@ -333,7 +342,7 @@ class KeyStore:
         """Return the secret key ``name`` (and its retired keys) as JSON, for :meth:`import_keys`."""
         record = self._find_record(name)
         if record is None:
-            raise TableNotFoundError(f"key {name!r} is not in {self._describe()}", name)
+            raise KeyNotFoundError(f"key {name!r} is not in {self._describe()}", name)
         return {_KEY_PREFIX + name: _key_entry(record)}
 
     def import_keys(
@@ -411,6 +420,11 @@ class KeyStore:
     def _loaded(self) -> Dict[str, Any]:
         if self._path is not None:
             signature = _signature(self._path)
+            if signature is None and (self._signature is not None or os.path.exists(f"{self._path}.lock")):
+                # The file is missing but has existed: on Windows another process
+                # may be replacing it right now. Writers hold the lock meanwhile.
+                with _file_lock(_resolve_link(self._path)):
+                    signature = _signature(self._path)
             if self._data is None or signature != self._signature:
                 self._data = _read_json(self._path)
                 self._signature = signature
@@ -431,7 +445,7 @@ class KeyStore:
             yield data
         else:
             # Lock and write the real file, so a symbolic link stays a link.
-            target = Path(os.path.realpath(self._path))
+            target = _resolve_link(self._path)
             with _file_lock(target):
                 data = _read_json(target)
                 before = dict(data)
@@ -441,6 +455,48 @@ class KeyStore:
                 self._signature = _signature(self._path)
         self._data = data
         self._cache.clear()
+
+
+def validate_key_name(name: object) -> str:
+    """Return ``name`` if it is a valid key name: 1-64 ASCII letters or underscores.
+
+    The error never repeats the name, in case a secret was passed by mistake.
+    """
+    try:
+        return validate_family(name)
+    except InvalidNameError:
+        raise InvalidNameError(
+            "invalid key name: use 1-64 ASCII letters or underscores (to use a raw key, "
+            "pass 32 bytes, e.g. bytes.fromhex(...); for your own secret, use token=)"
+        ) from None
+
+
+def _usable_keys(entries: List[Tuple[str, Any]], decode: Callable[[str, Any], _KeyRecord]) -> List[bytes]:
+    records: List[_KeyRecord] = []
+    errors: List[KeyStoreError] = []
+    for entry, raw in entries:
+        try:
+            records.append(decode(entry, raw))
+        except KeyStoreError as exc:
+            errors.append(exc)
+    if errors and not records:
+        raise errors[0]
+    for error in errors:
+        warnings.warn(f"skipping a key that cannot be read: {error}", RuntimeWarning, stacklevel=3)
+    return [record.current for record in records] + [key for record in records for key in record.retired]
+
+
+def _resolve_link(path: Path) -> Path:
+    """Follow symbolic links to the real file without opening it.
+
+    ``os.path.realpath`` opens the file on Windows, which can return a
+    temporary name while another process replaces it.
+    """
+    for _ in range(40):
+        if not path.is_symlink():
+            break
+        path = path.parent / os.readlink(path)
+    return Path(os.path.realpath(path.parent)) / path.name
 
 
 def family_of(name: object) -> Optional[str]:
@@ -508,6 +564,11 @@ def _key_entry(record: _KeyRecord) -> Dict[str, Any]:
 
 
 def _parse_key_record(entry: str, raw: Any) -> _KeyRecord:
+    if isinstance(raw, dict) and "dpapi" in raw and "secret" not in raw:
+        raise KeyStoreError(
+            f"{entry!r} is protected with Windows DPAPI: open this file with DpapiKeyStore "
+            "(CLI: --key-backend dpapi)"
+        )
     if not isinstance(raw, dict):
         raise KeyStoreError(f"{entry!r} is invalid: expected a base64 'secret' of {KEY_SIZE} bytes")
     retired = raw.get("retired", [])
@@ -542,9 +603,9 @@ def parse_key_entries(keys: Mapping[str, Any], name: Optional[str] = None) -> Di
         if not _is_key_entry(entry):
             raise KeyStoreError(f"{entry!r} is not a key entry ('key:<name>')")
         try:
-            validate_family(entry[len(_KEY_PREFIX) :])
+            validate_key_name(entry[len(_KEY_PREFIX) :])
         except YaceError as exc:
-            raise KeyStoreError(f"invalid key name in {entry!r}: {exc}") from None
+            raise KeyStoreError(f"invalid key entry: {exc}") from None
         incoming[entry] = _key_entry(_parse_key_record(entry, raw))
     return incoming
 
@@ -611,11 +672,10 @@ def _write_json(path: Path, data: Mapping[str, Any]) -> None:
     except OSError as exc:
         raise KeyStoreError(f"cannot write key store '{path}': {exc}") from exc
     try:
-        if not path.exists():
-            # A new store holds keys: only its owner may read it, from the first
-            # byte. (Existing files keep their permissions, so deliberately shared
-            # stores stay shared.)
-            restrict_to_owner(tmp)
+        # The copy holds keys: only its owner may read it, from the first byte.
+        # Replacing an existing store keeps that store's own permissions (see
+        # _swap_in); a new store stays owner-only.
+        restrict_to_owner(tmp)
         with os.fdopen(fd, "wb") as fh:
             fh.write(payload)
             fh.flush()
@@ -759,6 +819,13 @@ else:
                 with contextlib.suppress(OSError):
                     os.chown(tmp, -1, st.st_gid)
         os.replace(tmp, path)
+        # Make the rename itself durable, so a returned key survives a power cut.
+        with contextlib.suppress(OSError):
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
 
     def _lock_fd(fd: int, path: Path) -> None:
         try:

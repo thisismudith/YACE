@@ -14,6 +14,7 @@ __all__ = [
     "EncodingError",
     "InvalidKeyError",
     "InvalidNameError",
+    "KeyNotFoundError",
     "KeyStoreError",
     "TableNotFoundError",
     "TokenExpiredError",
@@ -74,6 +75,14 @@ class TableNotFoundError(YaceError, LookupError):
     def __init__(self, message: str, table_name: str = "") -> None:
         super().__init__(message)
         self.table_name = table_name
+
+
+class KeyNotFoundError(TableNotFoundError):
+    """A secret key is not in the key backend; ``key_name`` names it."""
+
+    @property
+    def key_name(self) -> str:
+        return self.table_name
 
 
 class KeyStoreError(YaceError):

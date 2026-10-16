@@ -31,7 +31,7 @@ def test_bytes_output_has_no_expansion():
         raw = yace.encrypt(b"x" * size, key=KEY, output="bytes")
         text = yace.encrypt(b"x" * size, key=KEY)
         tag = 16
-        assert len(raw) == 16 + 2 + sealed.padme(17 + size) + tag
+        assert len(raw) == 16 + 6 + sealed.padme(17 + size) + tag
         assert len(sealed.yace62_decode(text)) == len(raw)
         assert len(text) > len(raw)
 

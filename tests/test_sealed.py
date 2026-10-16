@@ -319,4 +319,4 @@ def test_cli_max_age(run, tmp_path):
     code, token, _ = run("encrypt", "--text", "fresh")
     assert run("decrypt", "--max-age", "60", stdin=token)[:2] == (0, b"fresh")
     code, _, err = run("decrypt", "--max-age", "-1", stdin=token)
-    assert code == 1 and "seconds old" in err
+    assert code == 1 and "seconds ago" in err

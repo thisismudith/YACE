@@ -87,6 +87,7 @@ if sys.platform == "win32":
         try:
             return ctypes.string_at(blob.pbData, blob.cbData)
         finally:
+            ctypes.memset(blob.pbData, 0, blob.cbData)  # do not leave a key in freed memory
             _LocalFree(ctypes.cast(blob.pbData, wintypes.HLOCAL))
 
     def protect(data: bytes) -> bytes:
@@ -111,8 +112,8 @@ if sys.platform == "win32":
             _CRYPTPROTECT_UI_FORBIDDEN, ctypes.byref(out),
         ):
             raise KeyStoreError(
-                "DPAPI could not unprotect a key; it was protected by another Windows "
-                f"user or computer ({ctypes.WinError(ctypes.get_last_error())})"
+                "DPAPI could not decrypt a key: it was protected by another Windows user or "
+                f"computer, or it is damaged ({ctypes.WinError(ctypes.get_last_error())})"
             )
         return _take(out)
 

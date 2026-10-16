@@ -9,7 +9,8 @@ token's salt) into a :class:`Cipher` bound to one token or stream:
   nonce twice.
 - ``yace-hmac-sha256`` uses only Python's standard library: a keystream of
   HMAC-SHA256 blocks in counter mode, and an HMAC-SHA256 tag over the
-  associated data and the ciphertext (encrypt-then-MAC).
+  associated data and the ciphertext (encrypt-then-MAC), truncated to 16 bytes
+  so every algorithm has the same tag size and output length.
 """
 
 from __future__ import annotations
@@ -39,6 +40,9 @@ class AlgorithmInfo(NamedTuple):
     description: str
 
 
+AlgorithmInfo.__module__ = "yace_codec"
+
+
 class Cipher:
     """Encrypts and authenticates the parts of one token or stream.
 
@@ -66,18 +70,29 @@ def hkdf_expand(prk: bytes, info: bytes, length: int = 32) -> bytes:
 
 
 def xor_keystream(key: bytes, data: bytes, prefix: bytes = b"") -> bytes:
-    """XOR ``data`` with HMAC-SHA256(key, prefix || u64 counter) blocks."""
-    if not data:
-        return b""
-    stream = b"".join(
-        hmac.digest(key, prefix + counter.to_bytes(8, "big"), "sha256")
-        for counter in range(-(-len(data) // 32))
-    )[: len(data)]
-    return (int.from_bytes(data, "big") ^ int.from_bytes(stream, "big")).to_bytes(len(data), "big")
+    """XOR ``data`` with HMAC-SHA256(key, prefix || u64 counter) blocks.
+
+    Works through ``data`` in 64 KiB pieces, so memory stays proportional to it.
+    """
+    out = bytearray(len(data))
+    counter = 0
+    for start in range(0, len(data), _XOR_PIECE):
+        piece = data[start : start + _XOR_PIECE]
+        blocks = -(-len(piece) // 32)
+        stream = b"".join(
+            hmac.digest(key, prefix + (counter + i).to_bytes(8, "big"), "sha256") for i in range(blocks)
+        )[: len(piece)]
+        counter += blocks
+        mixed = int.from_bytes(piece, "big") ^ int.from_bytes(stream, "big")
+        out[start : start + len(piece)] = mixed.to_bytes(len(piece), "big")
+    return bytes(out)
+
+
+_XOR_PIECE = 64 * 1024  # a multiple of the 32-byte block size
 
 
 class _HmacCipher(Cipher):
-    tag_size = 32
+    tag_size = 16
 
     def __init__(self, encrypt_key: bytes, mac_key: bytes, ad: bytes) -> None:
         self._encrypt_key = encrypt_key
@@ -90,7 +105,7 @@ class _HmacCipher(Cipher):
         mac = self._mac.copy()
         mac.update(suffix)
         mac.update(ciphertext)
-        return mac.digest()
+        return mac.digest()[: self.tag_size]
 
     def seal(self, suffix: bytes, plaintext: bytes) -> bytes:
         ciphertext = xor_keystream(self._encrypt_key, plaintext, suffix)
@@ -132,7 +147,7 @@ class _AeadCipher(Cipher):
             return None
         try:
             return bytes(self._aead.decrypt(self._nonce_for(suffix), body, self._ad))
-        except self._invalid_tag:
+        except (self._invalid_tag, OverflowError):  # OverflowError: over 2 GiB
             return None
 
 
@@ -208,7 +223,7 @@ _ALGORITHMS: List[_Algorithm] = [
         "ChaCha20Poly1305",
     ),
     _Hmac(
-        "yace-hmac-sha256", 1, 32,
+        "yace-hmac-sha256", 1, 16,
         "HMAC-SHA256 keystream and tag (standard library only; slower, not audited)",
     ),
 ]

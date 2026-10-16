@@ -59,8 +59,8 @@ class Opener:
 
     def open(self, suffix: bytes, body: bytes) -> bytes:
         if self.alg_id == 1:
-            ciphertext, tag = body[:-32], body[-32:]
-            expected = hmac.digest(self.mac, self.ad + suffix + ciphertext, "sha256")
+            ciphertext, tag = body[:-16], body[-16:]
+            expected = hmac.digest(self.mac, self.ad + suffix + ciphertext, "sha256")[:16]
             assert hmac.compare_digest(tag, expected)
             return keystream_xor(self.enc, ciphertext, suffix)
         nonce = self.nonce[: 12 - len(suffix)] + suffix
@@ -82,8 +82,10 @@ def test_independent_decryption(vector):
     raw = yace62_decode(vector["expected"]) if vector["output"] == "text" else bytes.fromhex(vector["expected"])
     salt = raw[:16]
     secret = secret_for(vector, salt)
-    mask = hkdf(secret, salt, b"yace3 header mask", 3)
+    mask = hkdf(secret, salt, b"yace3 header mask", 7)
     version, alg_id = raw[16] ^ mask[0], raw[17] ^ mask[1]
+    check_at = 18 if version == 3 else 19
+    assert bytes(a ^ b for a, b in zip(raw[check_at : check_at + 4], mask[check_at - 16 :])) == bytes(4)
     assert version == vector["format"] and alg_id == ALG_IDS[vector["algorithm"]]
     aad = vector["aad"].encode()
     aad_block = len(aad).to_bytes(8, "big") + aad
@@ -91,7 +93,7 @@ def test_independent_decryption(vector):
 
     if version == 3:
         opener = Opener(secret, salt, 3, alg_id, salt + bytes([3, alg_id]) + aad_block)
-        frame = opener.open(b"", raw[18:])
+        frame = opener.open(b"", raw[22:])
         kind, created, length = struct.unpack_from("!BQQ", frame)
         assert (kind == 1) is vector["text"] and created == vector["created"]
         assert frame[17 : 17 + length] == expected
@@ -101,8 +103,8 @@ def test_independent_decryption(vector):
     log2 = raw[18] ^ mask[2]
     assert 1 << log2 == vector["chunk_size"]
     opener = Opener(secret, salt, 4, alg_id, salt + bytes([4, alg_id, log2]) + aad_block)
-    size = (1 << log2) + (32 if alg_id == 1 else 16)
-    body = raw[19:]
+    size = (1 << log2) + 16
+    body = raw[23:]
     chunks = [body[i : i + size] for i in range(0, len(body), size)]
     data = b""
     for index, chunk in enumerate(chunks):
