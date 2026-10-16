@@ -647,7 +647,8 @@ key is used (`--key NAME`, default `default`), from the backend chosen with
 `--key-backend json|dpapi|keyring`.
 
 `-o PATH` is written to a temporary file that replaces `PATH` only when everything
-succeeded, so a failed decryption never leaves a partial file. Standard output
+succeeded, so a failed decryption never leaves a partial file. Decrypted files and
+exported keys are created readable by you only. Standard output
 cannot be taken back: if decryption fails part way, discard what was printed.
 `keys import` needs `--name NAME` (or `--all-keys`), and `keys delete` needs `--yes`.
 

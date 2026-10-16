@@ -39,7 +39,7 @@ import secrets
 import string
 import struct
 import time
-from typing import BinaryIO, Callable, Iterable, List, Literal, NamedTuple, Optional, Tuple, Union
+from typing import BinaryIO, Callable, Iterable, List, Literal, NamedTuple, Optional, Tuple, Union, cast
 
 from . import _algorithms
 from ._algorithms import DEFAULT_ALGORITHM, hkdf_expand
@@ -94,6 +94,8 @@ _MIN_CHUNK_LOG2 = 6
 _MAX_CHUNK_LOG2 = 20
 _MAX_CHUNK_INDEX = 2**32 - 1
 _IO_SIZE = 64 * 1024
+_LEGACY_LIMIT = 64 * 1024 * 1024
+_CANNOT_OPEN = "this cannot be opened: wrong secret token, key, or aad, or the data was changed"
 _KIND_BYTES = 0
 _KIND_TEXT = 1
 _MASK_INFO = b"yace3 header mask"
@@ -110,6 +112,7 @@ _BYTES_FOR = {chars: size for size, chars in _CHARS_FOR.items()}
 # The smallest token: an empty stream (salt, header, one chunk of a 4-byte count
 # and 10 bytes of padded metadata, 16-byte tag). Messages are at least 52 bytes.
 _MIN_BYTES = SALT_SIZE + 3 + 4 + 10 + 16
+_TEXT_CHARS = frozenset(_ALPHABET + "_ " + string.whitespace)
 _TEXT_BYTES = frozenset((_ALPHABET + "_ " + string.whitespace).encode("ascii"))
 _BOMS = (codecs.BOM_UTF8, codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE, codecs.BOM_UTF32_BE)
 # UTF-32 first: its little-endian BOM starts with the UTF-16 one.
@@ -148,7 +151,7 @@ def seal(
     as_text = _wants_text(output)
     alg = _algorithms.by_name(algorithm)
     aad_block = _aad_block(aad)
-    salt = secrets.token_bytes(SALT_SIZE) if salt is None else _check_salt(salt)
+    salt = _new_salt() if salt is None else _check_salt(salt)
     prk = _extract(salt, _secret(salt, key=key, secret=secret))
     created = int(time.time() if now is None else now)
     frame = _FRAME.pack(_KIND_TEXT if text else _KIND_BYTES, created, len(data)) + bytes(data)
@@ -223,7 +226,7 @@ def seal_stream(
     writer = _Writer(dst, _wants_text(output))
     alg = _algorithms.by_name(algorithm)
     aad_block = _aad_block(aad)
-    salt = secrets.token_bytes(SALT_SIZE) if salt is None else _check_salt(salt)
+    salt = _new_salt() if salt is None else _check_salt(salt)
     prk = _extract(salt, _secret(salt, key=key, secret=secret))
     mask = _mask(prk)
     cipher = alg.cipher(prk, VERSION_STREAM, salt + bytes([VERSION_STREAM, alg.id, log2]) + aad_block)
@@ -238,6 +241,8 @@ def seal_stream(
         writer.write(cipher.seal(_chunk_suffix(index, last), _COUNT.pack(len(real)) + real + bytes(zeros)))
         index += 1
 
+    if text:
+        src = cast(BinaryIO, _Utf8Checked(src))
     created = int(time.time() if now is None else now)
     buf = _STREAM_META.pack(_KIND_TEXT if text else _KIND_BYTES, created)
     buf += _read_up_to(src, capacity - len(buf))
@@ -280,7 +285,7 @@ def unseal_stream(
     part of the data: discard it.
     """
     aad_block = _aad_block(aad)
-    reader, prefix = _token_reader(src)
+    reader, prefix, as_text = _token_reader(src)
     if prefix:
         raw = reader.read_all()
         data, is_text = _open_frame(prefix, raw, _candidates(raw[:SALT_SIZE], keys, secret), aad_block, max_age, now)
@@ -295,7 +300,14 @@ def unseal_stream(
         info = _open_chunks(reader, head[:SALT_SIZE], streams, dst, aad_block, max_age, now)
         if info is not None:
             return info
-    raw = head + reader.read_all()
+    if _message_candidates(head, candidates):
+        raw = head + reader.read_all()
+    elif as_text and len(aad_block) == 8:
+        # Only a 0.2.1 token (text, no header, no associated data) is left; those
+        # were made in memory, so a huge input cannot be one.
+        raw = head + reader.read_all(limit=_LEGACY_LIMIT)
+    else:
+        raise DecryptionError(_CANNOT_OPEN)
     if len(raw) < _MIN_BYTES:
         raise DecodingError("the token is truncated or corrupted")
     data, is_text = _open_frame("", raw, candidates, aad_block, max_age, now)
@@ -323,9 +335,7 @@ def _open_frame(
     else:
         if unavailable:
             raise unavailable[0]
-        raise DecryptionError(
-            "this cannot be opened: wrong secret token or key, or the data was changed"
-        )
+        raise DecryptionError(_CANNOT_OPEN)
     kind, created, length = _FRAME.unpack_from(frame)
     if kind not in (_KIND_BYTES, _KIND_TEXT) or _FRAME.size + length > len(frame):
         raise DecryptionError("the token's contents are malformed")
@@ -334,6 +344,15 @@ def _open_frame(
 
 
 _StreamCandidate = Tuple[bytes, "_algorithms._Algorithm", int]
+
+
+def _message_candidates(head: bytes, candidates: List[bytes]) -> bool:
+    """Whether any secret's header mask reveals a single-message (version 3) header."""
+    for candidate in candidates:
+        mask = _mask(_extract(head[:SALT_SIZE], candidate))
+        if head[SALT_SIZE] ^ mask[0] == VERSION_MESSAGE and _algorithms.by_id(head[SALT_SIZE + 1] ^ mask[1]):
+            return True
+    return False
 
 
 def _stream_candidates(head: bytes, candidates: List[bytes]) -> List[_StreamCandidate]:
@@ -463,6 +482,22 @@ def _write_all(dst: BinaryIO, data: bytes) -> None:
         view = view[written:]
 
 
+class _Utf8Checked:
+    """Passes reads through, raising EncodingError unless the data is valid UTF-8."""
+
+    def __init__(self, src: BinaryIO) -> None:
+        self._src = src
+        self._decoder = codecs.getincrementaldecoder("utf-8")()
+
+    def read(self, size: int) -> bytes:
+        piece = self._src.read(size) or b""
+        try:
+            self._decoder.decode(piece, not piece)
+        except UnicodeDecodeError:
+            raise EncodingError("the data is not valid UTF-8 text; use text=False for bytes") from None
+        return piece
+
+
 class _Writer:
     """Writes raw bytes, or YACE62 text (8-byte blocks; the remainder at close)."""
 
@@ -510,7 +545,7 @@ class _ByteReader:
     def unread(self, data: bytes) -> None:
         self._back[:0] = data
 
-    def read_all(self) -> bytes:
+    def read_all(self, limit: Optional[int] = None) -> bytes:
         out = bytearray(self._back)
         self._back.clear()
         while True:
@@ -518,6 +553,8 @@ class _ByteReader:
             if not piece:
                 return bytes(out)
             out += piece
+            if limit is not None and len(out) > limit:
+                raise DecryptionError(_CANNOT_OPEN)
 
 
 class _Yace62Source:
@@ -569,18 +606,21 @@ class _Yace62Source:
         self._done = final
 
 
-def _token_reader(src: BinaryIO) -> Tuple[_ByteReader, str]:
-    """Wrap ``src`` so it yields binary token bytes, decoding text tokens on the fly."""
+def _token_reader(src: BinaryIO) -> Tuple[_ByteReader, str, bool]:
+    """Wrap ``src`` so it yields binary token bytes, decoding text tokens on the fly.
+
+    Returns the reader, the legacy prefix (if any), and whether the input is text.
+    """
     first = _read_up_to(src, 64)
     if not first:
         raise DecodingError("the token is empty")
-    if not is_text_token(first):
+    if not is_text_token(first, complete=len(first) < 64):
         reader = _ByteReader(src.read)
         reader.unread(first)
-        return reader, ""
+        return reader, "", False
     source = _Yace62Source(src, first)
     prefix = source.take_prefix()
-    return _ByteReader(source.read), prefix
+    return _ByteReader(source.read), prefix, True
 
 
 def padme(length: int) -> int:
@@ -657,13 +697,22 @@ def _wants_text(output: object) -> bool:
     return output == "text"
 
 
-def is_text_token(data: bytes) -> bool:
+def is_text_token(data: bytes, *, complete: bool = True) -> bool:
     """Return whether ``data`` holds a text token (YACE62, maybe with a BOM).
 
-    Binary tokens start with a random salt, so the chance that one consists of
-    letters, digits, and whitespace only is below 10**-30.
+    Binary tokens start with a random salt that never starts like a byte order
+    mark (older binary output may), and the chance that 50 or more random bytes
+    are all letters, digits, and whitespace is below 10**-28. With
+    ``complete=False``, ``data`` is only the start of the input.
     """
-    return data.startswith(_BOMS) or _TEXT_BYTES.issuperset(data)
+    encoding = next((enc for bom, enc in _TEXT_ENCODINGS if data.startswith(bom)), None)
+    if encoding is None:
+        return _TEXT_BYTES.issuperset(data)
+    try:
+        text = codecs.getincrementaldecoder(encoding)().decode(data, complete)
+    except UnicodeDecodeError:
+        return False
+    return _TEXT_CHARS.issuperset(text.lstrip("\ufeff"))
 
 
 def _token_bytes(token: TokenLike) -> Tuple[str, bytes]:
@@ -719,6 +768,8 @@ def _open_legacy(prk: bytes, prefix: str, raw: bytes) -> Optional[bytes]:
 
 def _check_age(created: int, max_age: Optional[float], now: Optional[float]) -> None:
     if max_age is not None:
+        if max_age != max_age:
+            raise ValueError("max_age must be a number of seconds, not NaN")
         age = (time.time() if now is None else now) - created
         if age > max_age:
             raise TokenExpiredError(f"the token is {int(age)} seconds old (limit {max_age})")
@@ -741,6 +792,14 @@ def _extract(salt: bytes, secret: bytes) -> bytes:
 
 def _mask(prk: bytes) -> bytes:
     return hkdf_expand(prk, _MASK_INFO, 3)
+
+
+def _new_salt() -> bytes:
+    """A random salt that does not start like a byte order mark (see is_text_token)."""
+    while True:
+        salt = secrets.token_bytes(SALT_SIZE)
+        if not salt.startswith(_BOMS):
+            return salt
 
 
 def _check_salt(salt: bytes) -> bytes:

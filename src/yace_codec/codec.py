@@ -47,7 +47,7 @@ from typing import (
 
 from . import sealed
 from ._text import TokenLike, token_text
-from .errors import DecodingError, EncodingError, UnsupportedCharacterError
+from .errors import DecodingError, DecryptionError, EncodingError, UnsupportedCharacterError
 from .keybackends import KeyBackend
 from .keystore import KeyStore
 from .tables import (
@@ -369,7 +369,12 @@ class Codec:
         data, is_text = sealed.unseal(
             encrypted, aad=aad, max_age=max_age, **self._decryption_secrets(token, password, keys)
         )
-        return data.decode("utf-8") if is_text else data
+        if not is_text:
+            return data
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise DecryptionError("the decrypted text is not valid UTF-8") from None
 
     def encrypt_stream(
         self,

@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import json
 import threading
 from pathlib import Path
 from random import Random
-from typing import Any, Dict, List, Mapping, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Mapping, Optional, Protocol, Tuple, runtime_checkable
 
 from . import _winsec
 from .errors import KeyStoreError, TableNotFoundError
@@ -32,6 +33,7 @@ from .keystore import (
     KeyStore,
     PathLike,
     _key_entry,
+    _decode_secret,
     _KeyRecord,
     _new_key,
     _parse_key_record,
@@ -144,9 +146,11 @@ class DpapiKeyStore(KeyStore):
 class KeyringKeyStore:
     """Secret keys in the system keyring (needs ``pip install yace-codec[keyring]``).
 
-    Each key is stored as the password of user ``key:<name>`` under
-    ``service``; a separate entry lists the names, because keyrings cannot
-    list their entries.
+    Each key is a small credential under ``service``: user ``key:<name>`` holds
+    ``{"secret": <base64>, "retired": <count>}``, and each retired key has its own
+    credential (``key:<name>:retired:<n>``, oldest first), so no credential grows
+    past keyring size limits. Keyrings cannot list their entries, so another
+    credential lists the names; it is repaired when an unlisted key is found.
     """
 
     _INDEX = "__yace_codec_key_names__"
@@ -161,7 +165,6 @@ class KeyringKeyStore:
             ) from None
         self.service = service
         self._keyring = keyring
-        self._errors = keyring.errors
         self._lock = threading.RLock()
 
     def __repr__(self) -> str:
@@ -174,7 +177,7 @@ class KeyringKeyStore:
                 names = json.loads(raw) if raw else []
             except ValueError:
                 raise KeyStoreError(f"the keyring's key index for {self.service!r} is corrupted") from None
-            return sorted(name for name in names if isinstance(name, str))
+            return sorted({name for name in names if isinstance(name, str)})
 
     def find_key(self, name: str) -> Optional[bytes]:
         record = self._record(name)
@@ -197,25 +200,35 @@ class KeyringKeyStore:
             if record is None:
                 record = _KeyRecord(_new_key(rng), ())
                 self._store(name, record)
+            else:
+                self._index_add(name)
             return record.current
 
     def rotate_key(self, name: str, *, rng: Optional[Random] = None) -> bytes:
         validate_family(name)
         with self._lock:
-            old = self._record(name)
             key = _new_key(rng)
-            retired = () if old is None else (old.current,) + old.retired
-            self._store(name, _KeyRecord(key, retired))
+            old = self._main(name)
+            if old is None:
+                self._store(name, _KeyRecord(key, ()))
+                return key
+            current, count = old
+            # Append the old key as the newest retired one, then switch.
+            self._set(self._retired_user(name, count), _b64(current))
+            self._set(_KEY_PREFIX + name, json.dumps({"secret": _b64(key), "retired": count + 1}))
+            self._index_add(name)
             return key
 
     def delete_key(self, name: str) -> None:
         with self._lock:
-            if self._record(name) is None:
+            main = self._main(name)
+            listed = name in self.key_names()
+            if main is None and not listed:
                 raise TableNotFoundError(f"key {name!r} is not in the keyring service {self.service!r}", name)
-            try:
-                self._keyring.delete_password(self.service, _KEY_PREFIX + name)
-            except self._errors.KeyringError as exc:
-                raise KeyStoreError(f"cannot delete key {name!r} from the keyring: {exc}") from None
+            if main is not None:
+                for index in range(main[1]):
+                    self._delete(self._retired_user(name, index))
+                self._delete(_KEY_PREFIX + name)
             self._set(self._INDEX, json.dumps([n for n in self.key_names() if n != name]))
 
     def export_key(self, name: str) -> Dict[str, Dict[str, Any]]:
@@ -229,44 +242,82 @@ class KeyringKeyStore:
     ) -> ImportResult:
         incoming = parse_key_entries(keys, name)
         with self._lock:
+            # Look every incoming key up directly: the index may have missed one.
             current = {
-                _KEY_PREFIX + n: _key_entry(record)
-                for n in self.key_names()
-                if (record := self._record(n)) is not None
+                entry: _key_entry(record)
+                for entry in incoming
+                if (record := self._record(entry[len(_KEY_PREFIX) :])) is not None
             }
             result = _plan_import(current, incoming, overwrite, lambda _entry, raw: raw, "key")
             for entry in result.added + result.replaced:
                 self._store(entry[len(_KEY_PREFIX) :], _parse_key_record(entry, incoming[entry]))
+            for entry in result.unchanged:
+                self._index_add(entry[len(_KEY_PREFIX) :])
         return result
 
-    def _record(self, name: str) -> Optional[_KeyRecord]:
+    @staticmethod
+    def _retired_user(name: str, index: int) -> str:
+        return f"{_KEY_PREFIX}{name}:retired:{index}"
+
+    def _main(self, name: str) -> Optional[Tuple[bytes, int]]:
+        """The current key and the number of retired keys, or ``None``."""
         raw = self._get(_KEY_PREFIX + name)
         if raw is None:
             return None
         try:
             data = json.loads(raw)
         except ValueError:
-            raise KeyStoreError(f"key {name!r} in the keyring is corrupted") from None
-        return _parse_key_record(_KEY_PREFIX + name, data)
+            data = None
+        if not isinstance(data, dict) or not isinstance(data.get("retired", 0), int):
+            raise KeyStoreError(f"key {name!r} in the keyring is corrupted")
+        return _decode_secret(_KEY_PREFIX + name, data.get("secret")), max(0, data.get("retired", 0))
+
+    def _record(self, name: str) -> Optional[_KeyRecord]:
+        main = self._main(name)
+        if main is None:
+            return None
+        current, count = main
+        retired = []
+        for index in range(count):
+            value = self._get(self._retired_user(name, index))
+            if value is None:
+                raise KeyStoreError(f"retired key {index} of {name!r} is missing from the keyring")
+            retired.append(_decode_secret(_KEY_PREFIX + name, value))
+        return _KeyRecord(current, tuple(reversed(retired)))  # newest first
 
     def _store(self, name: str, record: _KeyRecord) -> None:
-        self._set(_KEY_PREFIX + name, json.dumps(_key_entry(record)))
+        old = self._main(name)
+        retired = list(reversed(record.retired))  # oldest first
+        for index, key in enumerate(retired):
+            self._set(self._retired_user(name, index), _b64(key))
+        self._set(_KEY_PREFIX + name, json.dumps({"secret": _b64(record.current), "retired": len(retired)}))
+        if old is not None:
+            for index in range(len(retired), old[1]):
+                self._delete(self._retired_user(name, index))
+        self._index_add(name)
+
+    def _index_add(self, name: str) -> None:
         names = self.key_names()
         if name not in names:
             self._set(self._INDEX, json.dumps(sorted(names + [name])))
 
     def _get(self, user: str) -> Optional[str]:
-        try:
-            value = self._keyring.get_password(self.service, user)
-        except self._errors.KeyringError as exc:
-            raise KeyStoreError(f"cannot read the keyring: {exc}") from None
+        value = self._call("read", self._keyring.get_password, self.service, user)
         return value if isinstance(value, str) else None
 
     def _set(self, user: str, value: str) -> None:
+        self._call("write", self._keyring.set_password, self.service, user, value)
+
+    def _delete(self, user: str) -> None:
+        with contextlib.suppress(KeyStoreError):  # already gone
+            self._call("delete from", self._keyring.delete_password, self.service, user)
+
+    @staticmethod
+    def _call(what: str, function: Any, *args: Any) -> Any:
         try:
-            self._keyring.set_password(self.service, user, value)
-        except self._errors.KeyringError as exc:
-            raise KeyStoreError(f"cannot write to the keyring: {exc}") from None
+            return function(*args)
+        except Exception as exc:  # keyring backends raise their own exception types
+            raise KeyStoreError(f"cannot {what} the keyring: {type(exc).__name__}: {exc}") from None
 
 
 def open_key_backend(

@@ -63,7 +63,8 @@ the secret token nor the key:
   Use long, random tokens, or 32-byte keys.
 - **Stolen keys.** Anyone with a key, or a copy of a JSON key store, can decrypt
   everything encrypted with that key. The JSON key store keeps keys in plain text
-  (new files are readable only by their owner). `DpapiKeyStore` (Windows) and
+  (new files are readable only by their owner; files created before 0.3.0 keep their
+  permissions, so check them with `icacls` on Windows or `ls -l` on POSIX). `DpapiKeyStore` (Windows) and
   `KeyringKeyStore` keep keys out of plain files, but anything running as your user
   can still use them.
 - **Forward secrecy.** There is none: a leaked key or token opens earlier output

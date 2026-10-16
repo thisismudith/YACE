@@ -611,14 +611,15 @@ def _write_json(path: Path, data: Mapping[str, Any]) -> None:
     except OSError as exc:
         raise KeyStoreError(f"cannot write key store '{path}': {exc}") from exc
     try:
+        if not path.exists():
+            # A new store holds keys: only its owner may read it, from the first
+            # byte. (Existing files keep their permissions, so deliberately shared
+            # stores stay shared.)
+            restrict_to_owner(tmp)
         with os.fdopen(fd, "wb") as fh:
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
-        if not path.exists():
-            # A new store holds keys: only its owner may read it. (Existing files
-            # keep their permissions, so deliberately shared stores stay shared.)
-            restrict_to_owner(tmp)
         for attempt in itertools.count():
             try:
                 _swap_in(tmp, path)

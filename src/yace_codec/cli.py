@@ -9,6 +9,7 @@ import getpass
 import io
 import json
 import os
+import stat
 import sys
 import tempfile
 import warnings
@@ -20,6 +21,7 @@ from ._algorithms import DEFAULT_ALGORITHM, algorithms
 from .codec import DEFAULT_FAMILY, DEFAULT_ITERATIONS, DEFAULT_LENGTH, Codec
 from .errors import EncodingError, KeyStoreError, UnsupportedCharacterError, YaceError
 from .keybackends import BACKENDS, KeyBackend, open_key_backend
+from ._winsec import restrict_to_owner
 from .keystore import ENV_VAR, KeyStore, family_of
 
 PROG = "yace-codec"
@@ -53,6 +55,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 1
         target = f"{exc.filename}: " if exc.filename else ""
         return _fail(f"{target}{exc.strerror or exc}")
+    except MemoryError:
+        return _fail("not enough memory")
     except KeyboardInterrupt:
         return 130
 
@@ -160,7 +164,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     decr.add_argument("input", nargs="?", default="-", help="file to decrypt (default: stdin)")
     decr.add_argument("-t", "--text", help="decrypt this string instead of INPUT")
-    decr.add_argument("-o", "--output", metavar="PATH", help="write the result here (default: stdout)")
+    decr.add_argument(
+        "-o", "--output", metavar="PATH",
+        help="write the result here, only if decryption succeeds (default: stdout, which may "
+        "show part of the data before an error is found)",
+    )
     add_secret_options(decr, encrypting=False)
     decr.add_argument(
         "--max-age", type=float, metavar="SECONDS", help="reject data encrypted longer ago than this"
@@ -255,17 +263,8 @@ def _read_file(name: str) -> bytes:
     return Path(name).read_bytes()
 
 
-def _write_output(target: Optional[str], data: bytes, *, private: bool = False) -> None:
-    if target is None or target == "-":
-        _write_stdout(data)
-        return
-    if os.path.isdir(target):
-        raise IsADirectoryError(errno.EISDIR, "is a directory", target)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
-    fd = os.open(target, flags, 0o600 if private else 0o666)
-    if private and sys.platform != "win32":
-        os.fchmod(fd, 0o600)  # the open() mode only applies to new files
-    with os.fdopen(fd, "wb") as fh:
+def _write_output(target: Optional[str], data: bytes, *, access: str = "normal") -> None:
+    with _output_stream(target, access=access) as fh:
         fh.write(data)
 
 
@@ -317,7 +316,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
 def _cmd_export(args: argparse.Namespace) -> int:
     tables = _keystore(args).export_family(args.name)
     payload = json.dumps(tables, indent=2, ensure_ascii=True) + "\n"
-    _write_output(args.output, payload.encode("ascii"), private=True)
+    _write_output(args.output, payload.encode("ascii"), access="secret")
     return 0
 
 
@@ -373,7 +372,7 @@ def _cmd_encrypt(args: argparse.Namespace) -> int:
 def _cmd_decrypt(args: argparse.Namespace) -> int:
     secret = _secret_token(args)
     codec = Codec(KeyStore.in_memory()) if secret is not None else _key_codec(args)
-    with _input_stream(args) as src, _output_stream(args.output) as dst:
+    with _input_stream(args) as src, _output_stream(args.output, access="private") as dst:
         codec.decrypt_stream(src, dst, token=secret, aad=_aad(args), max_age=args.max_age)
     return 0
 
@@ -423,22 +422,46 @@ def _input_stream(args: argparse.Namespace) -> Iterator[BinaryIO]:
 
 
 @contextlib.contextmanager
-def _output_stream(target: Optional[str]) -> Iterator[BinaryIO]:
-    """Standard output, or a file that only replaces ``target`` once everything succeeded."""
+def _output_stream(target: Optional[str], *, access: str = "normal") -> Iterator[BinaryIO]:
+    """Standard output, or a file that only replaces ``target`` once everything succeeded.
+
+    ``access`` decides who may read a file:
+
+    - ``"normal"`` (ciphertext, encoded tokens): an existing file's mode, else the
+      default for new files.
+    - ``"private"`` (decrypted data): an existing file's mode, else only you.
+    - ``"secret"`` (exported keys and tables): always only you.
+
+    "Only you" is mode 0600 on POSIX and an owner-only ACL on Windows.
+    """
     if target is None or target == "-":
         yield cast(BinaryIO, _StdoutWriter())
         return
     if os.path.isdir(target):
         raise IsADirectoryError(errno.EISDIR, "is a directory", target)
+    try:
+        existing: Optional[int] = stat.S_IMODE(os.stat(target).st_mode)
+    except OSError:
+        existing = None
     directory, name = os.path.split(os.path.abspath(target))
     fd, tmp = tempfile.mkstemp(prefix=f".{name}.", suffix=".part", dir=directory)
     try:
+        if access != "normal":
+            restrict_to_owner(tmp)  # Windows; mkstemp already gives 0600 on POSIX
         with os.fdopen(fd, "wb") as fh:
             yield fh
         if sys.platform != "win32":
-            umask = os.umask(0)
-            os.umask(umask)
-            os.chmod(tmp, 0o666 & ~umask)  # like a normally created file
+            if access == "secret":
+                mode = 0o600
+            elif existing is not None:
+                mode = existing
+            elif access == "private":
+                mode = 0o600
+            else:
+                umask = os.umask(0)
+                os.umask(umask)
+                mode = 0o666 & ~umask  # like a normally created file
+            os.chmod(tmp, mode)
         os.replace(tmp, target)
     except BaseException:
         with contextlib.suppress(OSError):
@@ -535,7 +558,7 @@ def _cmd_keys_delete(args: argparse.Namespace) -> int:
 
 def _cmd_keys_export(args: argparse.Namespace) -> int:
     payload = json.dumps(_key_backend(args).export_key(args.name), indent=2) + "\n"
-    _write_output(args.output, payload.encode("ascii"), private=True)
+    _write_output(args.output, payload.encode("ascii"), access="secret")
     return 0
 
 
