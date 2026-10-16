@@ -27,13 +27,14 @@ Tokens from versions 0.2.0 (``yace2_`` prefix) and 0.2.1 still decrypt.
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import hmac
 import secrets
 import string
 import struct
 import time
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Iterable, List, Literal, Optional, Tuple, Union
 
 from . import _algorithms
 from ._algorithms import DEFAULT_ALGORITHM, hkdf_expand
@@ -67,6 +68,8 @@ _SCRYPT_MAXMEM = 256 * 1024 * 1024
 
 #: A secret chosen by the user: any non-empty text or bytes.
 Secret = Union[str, bytes, bytearray, memoryview]
+#: Output formats: YACE62 letters and digits, or raw bytes.
+Output = Literal["text", "bytes"]
 #: Associated data: bytes, or text (encoded as UTF-8).
 Aad = Union[str, bytes, bytearray, memoryview]
 
@@ -85,6 +88,8 @@ _CHARS_FOR = {1: 2, 2: 3, 3: 5, 4: 6, 5: 7, 6: 9, 7: 10, 8: 11}
 _BYTES_FOR = {chars: size for size, chars in _CHARS_FOR.items()}
 # The smallest token: salt, header, the smallest padded frame, and a 16-byte tag.
 _MIN_BYTES = SALT_SIZE + 2 + 18 + 16
+_TEXT_BYTES = frozenset((_ALPHABET + "_ " + string.whitespace).encode("ascii"))
+_BOMS = (codecs.BOM_UTF8, codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE, codecs.BOM_UTF32_BE)
 
 
 def seal(
@@ -97,8 +102,12 @@ def seal(
     algorithm: Optional[str] = None,
     now: Optional[float] = None,
     salt: Optional[bytes] = None,
-) -> str:
+    output: str = "text",
+) -> Union[str, bytes]:
     """Encrypt ``data`` with a 32-byte ``key`` or your own ``secret``; return a token.
+
+    With ``output="text"`` (the default) the token is YACE62 text; with
+    ``output="bytes"`` it is the raw binary token, about 27% smaller.
 
     ``aad`` (associated data) is authenticated but not stored: decryption needs
     the same ``aad``, so a token moved to another context (another record, user,
@@ -106,6 +115,7 @@ def seal(
     ``algorithm`` defaults to :data:`DEFAULT_ALGORITHM`. ``salt`` and ``now``
     fix the random salt and the creation time, for test vectors only.
     """
+    as_text = _wants_text(output)
     alg = _algorithms.by_name(algorithm)
     aad_block = _aad_block(aad)
     salt = secrets.token_bytes(SALT_SIZE) if salt is None else _check_salt(salt)
@@ -117,7 +127,7 @@ def seal(
     body = alg.cipher(prk, VERSION_MESSAGE, header + aad_block).seal(b"", frame)
     mask = _mask(prk)
     raw = salt + bytes([VERSION_MESSAGE ^ mask[0], alg.id ^ mask[1]]) + body
-    return yace62_encode(raw)
+    return yace62_encode(raw) if as_text else raw
 
 
 def unseal(
@@ -219,7 +229,28 @@ def looks_encrypted(text: str) -> bool:
     )
 
 
+def _wants_text(output: object) -> bool:
+    if output not in ("text", "bytes"):
+        raise ValueError(f"output must be 'text' or 'bytes', not {output!r}")
+    return output == "text"
+
+
+def is_text_token(data: bytes) -> bool:
+    """Return whether ``data`` holds a text token (YACE62, maybe with a BOM).
+
+    Binary tokens start with a random salt, so the chance that one consists of
+    letters, digits, and whitespace only is below 10**-30.
+    """
+    return data.startswith(_BOMS) or _TEXT_BYTES.issuperset(data)
+
+
 def _token_bytes(token: TokenLike) -> Tuple[str, bytes]:
+    if isinstance(token, (bytes, bytearray, memoryview)):
+        data = bytes(token)
+        if not is_text_token(data):
+            if len(data) < _MIN_BYTES:
+                raise DecodingError("the token is truncated or corrupted")
+            return "", data
     body = "".join(token_text(token).split())  # wrapped lines and CRLF are fine
     if not body:
         raise DecodingError("the token is empty")

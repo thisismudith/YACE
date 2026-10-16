@@ -27,7 +27,19 @@ import binascii
 import os
 import secrets
 from random import Random
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    overload,
+)
 
 from . import sealed
 from ._text import TokenLike, token_text
@@ -236,6 +248,7 @@ class Codec:
                 "the decoded text is not base64; was the token made with encode_bytes()?"
             ) from exc
 
+    @overload
     def encrypt(
         self,
         data: Union[str, BytesLike],
@@ -245,7 +258,46 @@ class Codec:
         password: Optional[sealed.Secret] = None,
         aad: sealed.Aad = b"",
         algorithm: Optional[str] = None,
-    ) -> str:
+        output: Literal["text"] = "text",
+    ) -> str: ...
+
+    @overload
+    def encrypt(
+        self,
+        data: Union[str, BytesLike],
+        key: Union[str, BytesLike, None] = None,
+        *,
+        token: Optional[sealed.Secret] = None,
+        password: Optional[sealed.Secret] = None,
+        aad: sealed.Aad = b"",
+        algorithm: Optional[str] = None,
+        output: Literal["bytes"],
+    ) -> bytes: ...
+
+    @overload
+    def encrypt(
+        self,
+        data: Union[str, BytesLike],
+        key: Union[str, BytesLike, None] = None,
+        *,
+        token: Optional[sealed.Secret] = None,
+        password: Optional[sealed.Secret] = None,
+        aad: sealed.Aad = b"",
+        algorithm: Optional[str] = None,
+        output: str,
+    ) -> Union[str, bytes]: ...
+
+    def encrypt(
+        self,
+        data: Union[str, BytesLike],
+        key: Union[str, BytesLike, None] = None,
+        *,
+        token: Optional[sealed.Secret] = None,
+        password: Optional[sealed.Secret] = None,
+        aad: sealed.Aad = b"",
+        algorithm: Optional[str] = None,
+        output: str = "text",
+    ) -> Union[str, bytes]:
         """Encrypt ``data`` (any text or bytes) into a token of letters and digits.
 
         Choose the secret with one of:
@@ -264,18 +316,24 @@ class Codec:
         :data:`~yace_codec.DEFAULT_ALGORITHM`, ``"aes-256-gcm"``). The result
         does not reveal the key, the algorithm, the exact length, or anything
         else about the data.
+
+        ``output="text"`` (the default) returns YACE62 letters and digits;
+        ``output="bytes"`` returns the raw binary token, with no expansion.
+        :meth:`decrypt` accepts both.
         """
         secret = _choose_secret(token, password)
         if key is not None and secret is not None:
             raise TypeError("pass either key or token, not both")
         raw, is_text = _plaintext(data)
         if secret is not None:
-            return sealed.seal(raw, text=is_text, secret=secret, aad=aad, algorithm=algorithm)
+            return sealed.seal(
+                raw, text=is_text, secret=secret, aad=aad, algorithm=algorithm, output=output
+            )
         if isinstance(key, (bytes, bytearray, memoryview)):
             raw_key = sealed.check_key(key)
         else:
             raw_key = self.keystore.ensure_key(DEFAULT_KEY if key is None else key, rng=self._rng)
-        return sealed.seal(raw, text=is_text, key=raw_key, aad=aad, algorithm=algorithm)
+        return sealed.seal(raw, text=is_text, key=raw_key, aad=aad, algorithm=algorithm, output=output)
 
     def decrypt(
         self,
@@ -320,6 +378,7 @@ class Codec:
         return {"keys": [self.keystore.get_key(name) for name in self.keystore.key_names()]}
 
 
+@overload
 def encrypt(
     data: Union[str, BytesLike],
     key: Union[str, BytesLike, None] = None,
@@ -329,14 +388,55 @@ def encrypt(
     keystore: KeyStoreLike = None,
     aad: sealed.Aad = b"",
     algorithm: Optional[str] = None,
-) -> str:
+    output: Literal["text"] = "text",
+) -> str: ...
+
+@overload
+def encrypt(
+    data: Union[str, BytesLike],
+    key: Union[str, BytesLike, None] = None,
+    *,
+    token: Optional[sealed.Secret] = None,
+    password: Optional[sealed.Secret] = None,
+    keystore: KeyStoreLike = None,
+    aad: sealed.Aad = b"",
+    algorithm: Optional[str] = None,
+    output: Literal["bytes"],
+) -> bytes: ...
+
+@overload
+def encrypt(
+    data: Union[str, BytesLike],
+    key: Union[str, BytesLike, None] = None,
+    *,
+    token: Optional[sealed.Secret] = None,
+    password: Optional[sealed.Secret] = None,
+    keystore: KeyStoreLike = None,
+    aad: sealed.Aad = b"",
+    algorithm: Optional[str] = None,
+    output: str,
+) -> Union[str, bytes]: ...
+
+def encrypt(
+    data: Union[str, BytesLike],
+    key: Union[str, BytesLike, None] = None,
+    *,
+    token: Optional[sealed.Secret] = None,
+    password: Optional[sealed.Secret] = None,
+    keystore: KeyStoreLike = None,
+    aad: sealed.Aad = b"",
+    algorithm: Optional[str] = None,
+    output: str = "text",
+) -> Union[str, bytes]:
     """Encrypt ``data``; shortcut for ``Codec(keystore).encrypt(...)``.
 
     With a ``token`` (your own secret) or a raw 32-byte ``key``, the key store
     is not used at all.
     """
     codec = Codec(KeyStore.in_memory() if _no_store_needed(key, token, password, keystore) else keystore)
-    return codec.encrypt(data, key, token=token, password=password, aad=aad, algorithm=algorithm)
+    return codec.encrypt(
+        data, key, token=token, password=password, aad=aad, algorithm=algorithm, output=output
+    )
 
 
 def decrypt(

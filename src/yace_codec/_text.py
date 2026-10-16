@@ -7,7 +7,7 @@ from typing import Union
 
 from .errors import DecodingError
 
-TokenLike = Union[str, bytes, bytearray]
+TokenLike = Union[str, bytes, bytearray, memoryview]
 
 # UTF-32 first: its little-endian BOM starts with the UTF-16 one.
 _BOMS = (
@@ -25,7 +25,7 @@ def token_text(token: TokenLike) -> str:
     Bytes are read as UTF-8, or as UTF-16/UTF-32 when they start with a byte
     order mark, because Windows tools often add one (PowerShell 5.1 writes UTF-16).
     """
-    if isinstance(token, (bytes, bytearray)):
+    if isinstance(token, (bytes, bytearray, memoryview)):
         raw = bytes(token)
         encoding = next((enc for bom, enc in _BOMS if raw.startswith(bom)), "utf-8")
         try:
